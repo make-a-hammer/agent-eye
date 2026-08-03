@@ -279,6 +279,65 @@ def to_json(results: list[ScoutResult], keyword: str) -> str:
     } for r in results], ensure_ascii=False, indent=2)
 
 
+# ─── 下载 ──────────────────────────────────────────
+
+
+def download_items(results: list[ScoutResult], min_score: int = 60,
+                   output_dir: str = "downloads", proxy: str | None = None,
+                   max_items: int = 5) -> list[str]:
+    """
+    下载选中的视频。
+    返回下载成功的文件路径列表。
+    """
+    import os
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 筛选：分值达标且是 YouTube 源
+    to_download = [
+        r for r in results
+        if r.move_score >= min_score and r.item.platform == "youtube" and r.item.url
+    ][:max_items]
+
+    if not to_download:
+        print("  ⚠️ 没有符合下载条件的视频")
+        return []
+
+    downloaded = []
+    for i, r in enumerate(to_download):
+        print(f"\n  📥 [{i+1}/{len(to_download)}] {r.item.title[:60]}...")
+        cmd = [
+            "yt-dlp",
+            "-o", f"{output_dir}/%(title).50s.%(ext)s",
+            "--no-playlist",
+            "--extract-audio",
+            "--audio-format", "mp3",
+            r.item.url,
+        ]
+        if proxy:
+            cmd.insert(1, "--proxy")
+            cmd.insert(2, proxy)
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode == 0:
+                # 找到刚下载的文件
+                for line in result.stdout.split("\n") + result.stderr.split("\n"):
+                    if "[download] Destination:" in line:
+                        path = line.split("Destination:", 1)[1].strip()
+                        downloaded.append(path)
+                        print(f"  ✅ {path}")
+                        break
+                else:
+                    downloaded.append(r.item.title)
+                    print(f"  ✅ 下载完成")
+            else:
+                print(f"  ❌ 下载失败: {result.stderr[-200:]}")
+        except subprocess.TimeoutExpired:
+            print(f"  ⏰ 超时")
+
+    return downloaded
+
+
 # ─── CLI ────────────────────────────────────────────
 
 
@@ -302,6 +361,17 @@ if __name__ == "__main__":
     results = scout(keyword, proxy=proxy)
     print_results(results, keyword)
 
-    # 同时输出 JSON（可管道给 agent-eye）
+    # --json 输出
     if "--json" in sys.argv:
         print(to_json(results, keyword))
+
+    # --download 下载选中的视频
+    if "--download" in sys.argv:
+        min_score = 60
+        for i, a in enumerate(sys.argv):
+            if a == "--min-score" and i + 1 < len(sys.argv):
+                min_score = int(sys.argv[i + 1])
+        print(f"\n{'='*70}")
+        print(f"  📥 开始下载（搬运价值 ≥ {min_score}）")
+        print(f"{'='*70}")
+        download_items(results, min_score=min_score, proxy=proxy)
