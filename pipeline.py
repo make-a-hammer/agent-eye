@@ -65,22 +65,21 @@ def step2_download(items: list[dict]) -> list[str]:
     return paths
 
 
-def step3_transcribe(audio_path: str) -> str:
-    """③ 转录"""
+def step3_transcribe(video_path: str) -> str:
+    """③ 转录（从视频提取音频 → whisper）"""
     print("\n" + "=" * 60)
-    print(f"  ③ 转录: {os.path.basename(audio_path)}")
+    print(f"  ③ 转录: {os.path.basename(video_path)}")
     print("=" * 60)
 
-    # 如果是 webm 先用 ffmpeg 转 mp3
-    if audio_path.endswith(".webm"):
-        mp3_path = audio_path.replace(".webm", ".mp3")
-        subprocess.run(["ffmpeg", "-i", audio_path, "-vn", "-acodec", "libmp3lame",
+    # 从视频提取音频
+    mp3_path = os.path.splitext(video_path)[0] + ".mp3"
+    if not os.path.exists(mp3_path):
+        subprocess.run(["ffmpeg", "-i", video_path, "-vn", "-acodec", "libmp3lame",
                         "-q:a", "2", mp3_path, "-y"],
                        capture_output=True, timeout=300)
-        audio_path = mp3_path
 
     result = subprocess.run(
-        ["whisper", audio_path, "--model", "tiny", "--language", "en",
+        ["whisper", mp3_path, "--model", "tiny", "--language", "en",
          "--output_format", "txt", "--output_dir", OUTPUT_DIR],
         capture_output=True, text=True, timeout=600,
     )

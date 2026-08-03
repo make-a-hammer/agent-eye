@@ -343,8 +343,6 @@ def download_items(results: list[ScoutResult], min_score: int = 60,
             "yt-dlp",
             "-o", f"{output_dir}/%(title).50s.%(ext)s",
             "--no-playlist",
-            "--extract-audio",
-            "--audio-format", "mp3",
             r.item.url,
         ]
         if proxy:
