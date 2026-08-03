@@ -120,30 +120,49 @@ def source_bilibili_search(keyword: str, max_results: int = 20) -> list[TrendIte
 
 
 def source_youtube(keyword: str, max_results: int = 10, proxy: str | None = None) -> list[TrendItem]:
-    """YouTube 搜索（需代理）"""
+    """YouTube 搜索（需代理），含发布日期"""
     items = []
     if not proxy:
-        return items  # 没代理，跳过
+        return items
     try:
+        # 第一步：flat 拿到 ID 列表（快）
         cmd = ["yt-dlp", "--proxy", proxy, "--flat-playlist", "--dump-json",
                f"ytsearch{max_results}:{keyword}"]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        ids = []
+        flat_items = []
         for line in result.stdout.strip().split("\n"):
-            if not line:
-                continue
+            if not line: continue
             try:
                 d = json.loads(line)
-                items.append(TrendItem(
-                    title=d.get("title", ""),
-                    url=d.get("webpage_url", d.get("original_url", "")),
-                    platform="youtube",
-                    views=d.get("view_count") or 0,
-                    likes=d.get("like_count") or 0,
-                    published_days=_days_ago(d.get("upload_date", "")),
-                    raw=d,
-                ))
+                vid = d.get("id", "") or d.get("display_id", "")
+                if vid:
+                    ids.append(vid)
+                    flat_items.append(d)
             except json.JSONDecodeError:
                 continue
+
+        # 第二步：用 ID 列表批量拿详情（含 upload_date）
+        for i, fid in enumerate(flat_items):
+            vid = fid.get("id", "") or fid.get("display_id", "")
+            if not vid: continue
+            url = f"https://www.youtube.com/watch?v={vid}"
+            try:
+                cmd2 = ["yt-dlp", "--proxy", proxy, "-j", "--skip-download", url]
+                r2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=20)
+                d = json.loads(r2.stdout)
+            except Exception:
+                d = fid  # 拿不到详情就用 flat 数据
+
+            items.append(TrendItem(
+                title=d.get("title", fid.get("title", "")),
+                url=d.get("webpage_url", f"https://www.youtube.com/watch?v={vid}"),
+                platform="youtube",
+                views=d.get("view_count") or 0,
+                likes=d.get("like_count") or 0,
+                published_days=_days_ago(d.get("upload_date", "")),
+                raw=d,
+            ))
     except Exception:
         pass
     return items
@@ -170,8 +189,17 @@ def score_item(item: TrendItem, keyword: str, domestic_items: list[TrendItem]) -
     else:
         heat = 5
 
-    # 新鲜度 (0-20)
-    fresh = int(item.freshness_score * 20)
+    # 新鲜度 (0-20) — 超过12个月直接0分
+    if item.published_days <= 1:
+        fresh = 20
+    elif item.published_days <= 7:
+        fresh = 15
+    elif item.published_days <= 30:
+        fresh = 10
+    elif item.published_days <= 90:
+        fresh = 5
+    else:
+        fresh = 0
 
     # 国内唯一性 (0-30)
     domestic_titles = {d.title.lower() for d in domestic_items}
@@ -182,13 +210,19 @@ def score_item(item: TrendItem, keyword: str, domestic_items: list[TrendItem]) -
 
     # 置信度
     if item.views == 0:
-        confidence = 0.3  # 数据不全
+        confidence = 0.3
     elif is_unique and item.views > 100_000:
         confidence = 0.85
     elif is_unique:
         confidence = 0.7
     else:
         confidence = 0.4
+
+    # 超过 12 个月的旧视频 — 降分 + 降置信度（放在置信度计算之后）
+    if item.published_days > 365:
+        total = max(0, total - 30)
+        if item.published_days != 999:
+            confidence = 0.2
 
     # 推荐理由
     reasons = []
