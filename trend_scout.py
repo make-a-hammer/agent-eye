@@ -342,7 +342,23 @@ def download_items(results: list[ScoutResult], min_score: int = 60,
 
 
 if __name__ == "__main__":
-    keyword = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "AI"
+    # 分离关键词和参数
+    raw_args = sys.argv[1:]
+    skip_next = False
+    args = []
+    for i, a in enumerate(raw_args):
+        if skip_next:
+            skip_next = False
+            continue
+        if a == "--min-score":
+            skip_next = True  # 下一个是值，跳过
+            continue
+        if not a.startswith("--"):
+            args.append(a)
+
+    keyword = " ".join(args) if args else "AI"
+
+    flags = [a for a in raw_args if a.startswith("--")]
 
     proxy = None
     # 检测代理是否可用
@@ -362,12 +378,13 @@ if __name__ == "__main__":
     print_results(results, keyword)
 
     # --json 输出
-    if "--json" in sys.argv:
+    if "--json" in flags:
         print(to_json(results, keyword))
 
     # --download 下载选中的视频
-    if "--download" in sys.argv:
+    if "--download" in flags:
         min_score = 60
+        # 从原始 sys.argv 中取 --min-score 的值
         for i, a in enumerate(sys.argv):
             if a == "--min-score" and i + 1 < len(sys.argv):
                 min_score = int(sys.argv[i + 1])
