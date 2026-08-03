@@ -23,6 +23,7 @@ from typing import Callable
 from vision import observe
 from hand import BrowserSession
 from thinker import decide, Decision
+from ethics import throttle
 
 
 async def run_agent(
@@ -60,6 +61,9 @@ async def run_agent(
                     "steps_taken": 0, "history": history}
 
         for step in range(1, max_steps + 1):
+            # 🔒 人类节奏——每步间隔 1-3 秒
+            throttle.wait()
+
             # ① 观察
             obs = await observe(hand.page, start_url if step == 1 else hand.page.url)
 

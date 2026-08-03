@@ -18,6 +18,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
+from ethics import throttle, log
+
 
 # ─── 数据模型 ────────────────────────────────────
 
@@ -146,6 +148,10 @@ def source_youtube(keyword: str, max_results: int = 10, proxy: str | None = None
         for i, fid in enumerate(flat_items):
             vid = fid.get("id", "") or fid.get("display_id", "")
             if not vid: continue
+
+            # 🔒 频率节流——模拟人类浏览节奏
+            throttle.wait()
+
             url = f"https://www.youtube.com/watch?v={vid}"
             try:
                 cmd2 = ["yt-dlp", "--proxy", proxy, "-j", "--skip-download", url]
@@ -261,6 +267,11 @@ def scout(keyword: str, proxy: str | None = None, max_results: int = 20) -> list
     # 4. 按搬运价值排序
     results.sort(key=lambda r: r.move_score, reverse=True)
 
+    # 📝 研究日志
+    log.log("trend_scout", "scout", keyword,
+            f"{len(results)} results from youtube",
+            "个人学术研究——分析海外内容生态与趋势")
+
     return results
 
 
@@ -367,6 +378,11 @@ def download_items(results: list[ScoutResult], min_score: int = 60,
         except subprocess.TimeoutExpired:
             print(f"  ⏰ 超时")
 
+        # 📝 研究日志
+        log.log("trend_scout", "download_item", r.item.url[:80],
+                f"{'ok' if downloaded else 'fail'}",
+                "个人学习——下载海外公开内容用于研究分析")
+
     return downloaded
 
 
@@ -392,14 +408,8 @@ if __name__ == "__main__":
 
     flags = [a for a in raw_args if a.startswith("--")]
 
-    proxy = None
-    # 检测代理是否可用
-    import socket
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(1)
-    if s.connect_ex(("127.0.0.1", 10808)) == 0:
-        proxy = "socks5://127.0.0.1:10808"
-    s.close()
+    from ethics import ProxyConfig
+    proxy = ProxyConfig.detect()
 
     if proxy:
         print(f"🌐 代理已检测到: {proxy}")
