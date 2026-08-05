@@ -1,0 +1,229 @@
+{
+  "version": 0,
+  "createdAt": "2026-08-05T00:00:00.000Z",
+  "updatedAt": "2026-08-05T00:00:00.000Z",
+  "seedProtocolPath": "seed-protocol",
+  "entries": [
+    {
+      "id": "agenteye-reactive-001",
+      "kind": "reactive",
+      "signature": {
+        "stage": "navigate",
+        "errorCode": "NAV_TIMEOUT",
+        "messagePattern": "(Timeout|timeout|Navigation timeout|net::ERR_)",
+        "fileContext": "*"
+      },
+      "rootCause": "网络不可达、代理未开或目标站点响应过慢。git-bash 直连 github/google 等海外源必现。",
+      "tags": ["network", "proxy", "timeout"],
+      "fix": {
+        "type": "behavior",
+        "description": "检测代理 127.0.0.1:10808 是否存活；存活则启用代理重试，否则换国内可达源。",
+        "actions": [
+          {"action": "check_proxy", "detail": "socket 探测 127.0.0.1:10808"},
+          {"action": "retry_with_proxy", "detail": "启用 socks5://127.0.0.1:10808 后重试导航"},
+          {"action": "give_up", "detail": "代理不可用且无国内源替代时放弃该步"}
+        ]
+      },
+      "occurrences": 0,
+      "contributingProjects": [],
+      "createdAt": "2026-08-05T00:00:00.000Z",
+      "lastMatchedAt": "2026-08-05T00:00:00.000Z"
+    },
+    {
+      "id": "agenteye-reactive-002",
+      "kind": "reactive",
+      "signature": {
+        "stage": "click",
+        "errorCode": "ELEMENT_NOT_FOUND",
+        "messagePattern": "(no such element|not found|Timeout waiting for|waiting for .* to be visible)",
+        "fileContext": "*"
+      },
+      "rootCause": "元素选择器错误、页面动态加载未完成、或元素被遮罩层挡住。",
+      "tags": ["element", "selector", "dynamic-loading"],
+      "fix": {
+        "type": "behavior",
+        "description": "等待更久让动态内容加载；滚动到元素附近再点击；仍失败则判定选择器错误，交还 LLM 重新决策。",
+        "actions": [
+          {"action": "wait_longer", "detail": "额外等待 3s 让异步内容渲染"},
+          {"action": "scroll_then_click", "detail": "滚动到元素位置后重试点击"},
+          {"action": "give_up", "detail": "重试 2 次仍失败，交还 thinker 换策略"}
+        ]
+      },
+      "occurrences": 0,
+      "contributingProjects": [],
+      "createdAt": "2026-08-05T00:00:00.000Z",
+      "lastMatchedAt": "2026-08-05T00:00:00.000Z"
+    },
+    {
+      "id": "agenteye-reactive-003",
+      "kind": "reactive",
+      "signature": {
+        "stage": "navigate",
+        "errorCode": "ANTIBOT_DETECTED",
+        "messagePattern": "(captcha|验证码|滑块|安全验证|verify you are human|cf-challenge|arkose|geetest)",
+        "fileContext": "*"
+      },
+      "rootCause": "目标站点反爬系统识别到自动化特征（无头模式、新环境指纹、频率异常）。",
+      "tags": ["antibot", "captcha", "risk-control"],
+      "fix": {
+        "type": "behavior",
+        "description": "合规策略：不尝试破解验证码。先等待观察是否自动通过；不通过则换入口或放弃该源。",
+        "actions": [
+          {"action": "wait_longer", "detail": "等待 5s 观察验证码是否自动通过（部分站点自动放行低风险请求）"},
+          {"action": "switch_source", "detail": "换镜像/替代源获取同一内容"},
+          {"action": "give_up", "detail": "记录到 research_log 后放弃，不尝试绕过"}
+        ]
+      },
+      "occurrences": 0,
+      "contributingProjects": [],
+      "createdAt": "2026-08-05T00:00:00.000Z",
+      "lastMatchedAt": "2026-08-05T00:00:00.000Z"
+    },
+    {
+      "id": "agenteye-reactive-004",
+      "kind": "reactive",
+      "signature": {
+        "stage": "navigate",
+        "errorCode": "HTTP_BLOCKED",
+        "messagePattern": "(403|429|Forbidden|Too Many Requests|rate limit)",
+        "fileContext": "*"
+      },
+      "rootCause": "站点风控拒绝：频率过高（429）或 UA/指纹被拉黑（403）。",
+      "tags": ["http", "rate-limit", "blocked"],
+      "fix": {
+        "type": "behavior",
+        "description": "降频节流后重试；确认 ethics 节流器生效；换 UA 或换源。",
+        "actions": [
+          {"action": "throttle_up", "detail": "临时提高节流延迟到 5s+ 再重试"},
+          {"action": "switch_source", "detail": "换替代源"},
+          {"action": "give_up", "detail": "记录后放弃"}
+        ]
+      },
+      "occurrences": 0,
+      "contributingProjects": [],
+      "createdAt": "2026-08-05T00:00:00.000Z",
+      "lastMatchedAt": "2026-08-05T00:00:00.000Z"
+    },
+    {
+      "id": "agenteye-reactive-005",
+      "kind": "reactive",
+      "signature": {
+        "stage": "observe",
+        "errorCode": "BLANK_PAGE",
+        "messagePattern": "(contenteditable|document\\.body\\.innerText length|空白|白屏)",
+        "fileContext": "*"
+      },
+      "rootCause": "SPA 页面 JS 渲染失败或导航后仍在加载，observe 抓到的正文为空。",
+      "tags": ["spa", "render", "blank"],
+      "fix": {
+        "type": "behavior",
+        "description": "等待 JS 执行完成后再观察；刷新一次；仍空白则判为源不可用。",
+        "actions": [
+          {"action": "wait_longer", "detail": "等待 3-5s 让 SPA 完成渲染"},
+          {"action": "reload", "detail": "刷新页面后重新观察"},
+          {"action": "give_up", "detail": "仍空白则换源"}
+        ]
+      },
+      "occurrences": 0,
+      "contributingProjects": [],
+      "createdAt": "2026-08-05T00:00:00.000Z",
+      "lastMatchedAt": "2026-08-05T00:00:00.000Z"
+    },
+    {
+      "id": "agenteye-reactive-006",
+      "kind": "reactive",
+      "signature": {
+        "stage": "click",
+        "errorCode": "NAVIGATION_DISRUPTED",
+        "messagePattern": "(Target closed|page closed|Execution context was destroyed|net::ERR_ABORTED)",
+        "fileContext": "*"
+      },
+      "rootCause": "点击触发了页面跳转/重载，导致原上下文销毁。属预期行为，需等新页面稳定后重新观察。",
+      "tags": ["navigation", "context-destroyed"],
+      "fix": {
+        "type": "behavior",
+        "description": "等待新页面加载完成后重新 observe，不视为失败。",
+        "actions": [
+          {"action": "wait_longer", "detail": "等待 2s 让新页面稳定"},
+          {"action": "reobserve", "detail": "重新观察当前页面继续任务"}
+        ]
+      },
+      "occurrences": 0,
+      "contributingProjects": [],
+      "createdAt": "2026-08-05T00:00:00.000Z",
+      "lastMatchedAt": "2026-08-05T00:00:00.000Z"
+    },
+    {
+      "id": "agenteye-reactive-007",
+      "kind": "reactive",
+      "signature": {
+        "stage": "any",
+        "errorCode": "LLM_JSON_FAIL",
+        "messagePattern": "(JSONDecodeError|Expecting value|Invalid JSON|Unexpected token)",
+        "fileContext": "*"
+      },
+      "rootCause": "LLM 返回了非 JSON 或截断内容，thinker.decide 解析失败。",
+      "tags": ["llm", "json", "parse"],
+      "fix": {
+        "type": "behavior",
+        "description": "重试 LLM 调用并要求严格 JSON；连续失败则降级为无 LLM fallback 决策。",
+        "actions": [
+          {"action": "retry_llm", "detail": "重试一次并强调'只输出 JSON'"},
+          {"action": "fallback_decide", "detail": "降级为关键词匹配的 fallback 决策"}
+        ]
+      },
+      "occurrences": 0,
+      "contributingProjects": [],
+      "createdAt": "2026-08-05T00:00:00.000Z",
+      "lastMatchedAt": "2026-08-05T00:00:00.000Z"
+    },
+    {
+      "id": "agenteye-proactive-001",
+      "kind": "proactive",
+      "signature": {
+        "stage": "preflight",
+        "errorCode": "PROXY_PREFLIGHT",
+        "messagePattern": "目标 URL 为海外域名（github/google/youtube 等）",
+        "fileContext": "*"
+      },
+      "rootCause": "直连海外源必超时，先探代理再导航可省一次失败循环。",
+      "tags": ["proactive", "proxy", "preflight"],
+      "fix": {
+        "type": "behavior",
+        "description": "导航前先 socket 探测代理；目标为海外域名且代理不可用则直接提示，不空跑导航。",
+        "actions": [
+          {"action": "check_proxy", "detail": "导航前预检代理状态"}
+        ]
+      },
+      "occurrences": 0,
+      "contributingProjects": [],
+      "createdAt": "2026-08-05T00:00:00.000Z",
+      "lastMatchedAt": "2026-08-05T00:00:00.000Z"
+    },
+    {
+      "id": "agenteye-proactive-002",
+      "kind": "proactive",
+      "signature": {
+        "stage": "preflight",
+        "errorCode": "THROTTLE_PREFLIGHT",
+        "messagePattern": "连续操作间隔小于 2s",
+        "fileContext": "*"
+      },
+      "rootCause": "频率过快是 429/验证码的首要诱因，节流应在动作前而非动作后。",
+      "tags": ["proactive", "throttle", "compliance"],
+      "fix": {
+        "type": "behavior",
+        "description": "确认每个动作前都经过 ethics.throttle.wait()，避免连发。",
+        "actions": [
+          {"action": "throttle_up", "detail": "动作前强制节流"}
+        ]
+      },
+      "occurrences": 0,
+      "contributingProjects": [],
+      "createdAt": "2026-08-05T00:00:00.000Z",
+      "lastMatchedAt": "2026-08-05T00:00:00.000Z"
+    }
+  ],
+  "rules": [],
+  "evolutionLog": []
+}

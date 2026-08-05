@@ -24,9 +24,15 @@ async def main():
     start_url = sys.argv[2] if len(sys.argv) > 2 else None
 
     if not start_url:
-        from sources import generate_search_urls
-        urls = generate_search_urls(query)
-        start_url = urls[0] if urls else f"https://lite.duckduckgo.com/lite/?q={quote(query)}"
+        from sources import generate_search_urls, _infer_source_types
+        types = _infer_source_types(query)
+        if "paper" in types:
+            # 学术查询直接走 arXiv 网页搜索
+            from urllib.parse import quote
+            start_url = f"https://arxiv.org/search/?query={quote(query)}&searchtype=all"
+        else:
+            urls = generate_search_urls(query)
+            start_url = urls[0] if urls else f"https://lite.duckduckgo.com/lite/?q={quote(query)}"
         print(f"   自动选择源: {start_url[:80]}...")
 
     print(f"🔍 agent-eye v2")
