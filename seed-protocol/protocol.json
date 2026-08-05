@@ -145,7 +145,8 @@
         "description": "等待新页面加载完成后重新 observe，不视为失败。",
         "actions": [
           {"action": "wait_longer", "detail": "等待 2s 让新页面稳定"},
-          {"action": "reobserve", "detail": "重新观察当前页面继续任务"}
+          {"action": "reobserve", "detail": "重新观察当前页面继续任务"},
+          {"action": "give_up", "detail": "仍不稳定则放弃该步，交还 thinker"}
         ]
       },
       "occurrences": 0,
@@ -169,7 +170,8 @@
         "description": "重试 LLM 调用并要求严格 JSON；连续失败则降级为无 LLM fallback 决策。",
         "actions": [
           {"action": "retry_llm", "detail": "重试一次并强调'只输出 JSON'"},
-          {"action": "fallback_decide", "detail": "降级为关键词匹配的 fallback 决策"}
+          {"action": "fallback_decide", "detail": "降级为关键词匹配的 fallback 决策"},
+          {"action": "give_up", "detail": "连续失败则放弃该步"}
         ]
       },
       "occurrences": 0,
