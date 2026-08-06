@@ -8,6 +8,7 @@ BrowserSession 封装 Playwright 原子操作：
 所有操作返回 (success: bool, detail: str)。
 """
 
+import os
 import asyncio
 
 HAS_PLAYWRIGHT = False
@@ -36,7 +37,7 @@ class BrowserSession:
         self._playwright = await async_playwright().start()
         try:
             self._context = await self._playwright.chromium.launch_persistent_context(
-                user_data_dir="C:/Users/小白本/ego_profile",
+                user_data_dir=os.path.expanduser("~/ego_profile"),
                 headless=self.headless,
                 viewport={"width": 1280, "height": 900},
                 locale="en-US",
