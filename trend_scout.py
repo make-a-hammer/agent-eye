@@ -27,6 +27,13 @@ try:
 except ImportError:
     HAS_OBC = False
 
+# Telegram 数据源（Bot API，零反爬）
+try:
+    from telegram_source import get_channel_messages as tg_get_messages, to_trend_items as tg_to_trend
+    HAS_TELEGRAM = True
+except ImportError:
+    HAS_TELEGRAM = False
+
 
 # ─── 数据模型 ────────────────────────────────────
 
@@ -108,6 +115,26 @@ def source_openbiliclaw(keyword: str = "", max_results: int = 20) -> list[TrendI
         return obc_to_trend(raw)
     except Exception:
         return []
+
+
+def source_telegram(channel: str = "", keyword: str = "", max_results: int = 20) -> list[TrendItem]:
+    """Telegram 频道消息——Bot API 直读，零反爬"""
+    items = []
+    if not HAS_TELEGRAM:
+        return items
+    from telegram_source import get_channel_messages as tg_msgs, to_trend_items as tg_items
+    try:
+        if channel:
+            msgs = tg_msgs(channel, max_results)
+            items = tg_items(msgs, source_label=channel)
+        elif keyword:
+            msgs = tg_msgs("", max_results * 2)
+            filtered = [m for m in msgs if keyword.lower() in m.get("text","").lower()]
+            items = tg_items(filtered[:max_results], source_label=f"search:{keyword}")
+            log.log("telegram","search",keyword,f"{len(items)} items")
+    except Exception as e:
+        print(f"  ⚠️ Telegram: {e}")
+    return items
 
 
 def source_bilibili_search(keyword: str, max_results: int = 20) -> list[TrendItem]:

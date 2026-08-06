@@ -15,6 +15,13 @@ try:
 except ImportError:
     HAS_OBC = False
 
+# Telegram 数据源（Bot API，可选）
+try:
+    from telegram_source import get_channel_messages as tg_get_messages, to_trend_items as tg_to_trend
+    HAS_TELEGRAM = True
+except ImportError:
+    HAS_TELEGRAM = False
+
 
 def generate_search_urls(query: str, source_types: list[str] | None = None) -> list[str]:
     """
