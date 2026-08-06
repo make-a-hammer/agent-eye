@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-ethics.py — agent-eye 合规防火墙
+ethics.py - agent-eye compliance firewall (ADR + reverse-skill inspired)
 
-三层技术保护：
-  1. 频率节流：所有操作加人类节奏延迟
-  2. 日志清白：自动记录研究意图，留下学术证据
-  3. 代理隔离：区分爬虫流量和个人流量
+Four-layer protection:
+  1. Throttle: human-rhythm delays between all actions
+  2. ResearchLog: JSONL audit trail proving academic intent
+  3. ProxyConfig: unified proxy detection and isolation
+  4. AnomalyDetector: auto-pause on consecutive failures (ADR mode)
 
-用法:
-    from ethics import throttle, ResearchLog, ProxyConfig
+Usage:
+    from ethics import throttle, log, ProxyConfig, AnomalyDetector
 """
 
 import time
@@ -20,25 +21,17 @@ from datetime import datetime
 from pathlib import Path
 
 
-# ─── 1. 频率节流 ──────────────────────────────────
+# --- 1. Throttle ---
 
-
-# 默认：模拟人类浏览节奏
 class Throttle:
-    """操作间隔控制器。模拟人类行为——不完全均匀，有微小随机波动。"""
+    """Delay controller - simulates human browsing rhythm."""
 
     def __init__(self, base_delay: float = 2.0, jitter: float = 1.0):
-        """
-        Args:
-            base_delay: 基础延迟（秒）
-            jitter: 随机抖动范围（±jitter 秒）
-        """
         self.base = base_delay
         self.jitter = jitter
         self._last_action = 0.0
 
     def wait(self):
-        """等待合适的时间间隔，然后记录本次操作时间。"""
         elapsed = time.time() - self._last_action
         needed = self.base + random.uniform(-self.jitter, self.jitter)
         if elapsed < needed:
@@ -46,35 +39,17 @@ class Throttle:
         self._last_action = time.time()
 
     def touch(self):
-        """只记录操作时间，不等待。（用于「刚操作完，这时开始计时」）"""
         self._last_action = time.time()
 
 
-# 全局实例——每个模块共用一个节流器
 throttle = Throttle(base_delay=2.0, jitter=1.0)
-
-# 快捷函数：等一等再操作
 pause = throttle.wait
 
 
-# ─── 2. 日志清白 ──────────────────────────────────
-
+# --- 2. ResearchLog ---
 
 class ResearchLog:
-    """
-    研究意图日志——记录 agent 在做什么、为什么做。
-    目的：万一被问到，能证明这是学术研究，不是恶意攻击。
-
-    日志格式（JSONL）：
-    {
-        "ts": "2026-08-03T12:00:00",
-        "agent": "trend_scout",
-        "action": "source_youtube",
-        "target": "ytsearch:AI工具",
-        "result": "10 items",
-        "note": "个人学习研究——分析海外AI内容生态"
-    }
-    """
+    """JSONL audit log - proves academic research intent."""
 
     def __init__(self, path: str = "research_log.jsonl"):
         self.path = Path(path)
@@ -92,34 +67,30 @@ class ResearchLog:
             "action": action,
             "target": target or "",
             "result": result or "",
-            "note": note or "个人学术研究",
+            "note": note or "personal academic research",
         }
         with open(self.path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     def tail(self, n: int = 10) -> str:
-        """查看最近 N 条日志"""
         lines = []
         if self.path.exists():
             lines = self.path.read_text(encoding="utf-8").strip().split("\n")[-n:]
         return "\n".join(lines)
 
 
-# 全局日志实例
 log = ResearchLog()
 
 
-# ─── 3. 代理隔离 ──────────────────────────────────
-
+# --- 3. ProxyConfig ---
 
 class ProxyConfig:
-    """检测并管理代理状态。"""
+    """Detect and manage proxy state."""
 
     DEFAULT_PROXY = "socks5://127.0.0.1:10808"
 
     @staticmethod
     def detect(host: str = "127.0.0.1", port: int = 10808) -> str | None:
-        """返回可用代理地址，不可用则返回 None。"""
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(1)
         alive = s.connect_ex((host, port)) == 0
@@ -128,24 +99,59 @@ class ProxyConfig:
 
     @staticmethod
     def status() -> dict:
-        """返回当前网络状态诊断。"""
         proxy = ProxyConfig.detect()
         return {
             "proxy_available": proxy is not None,
-            "proxy_address": proxy or "无",
-            "mode": "代理模式" if proxy else "直连模式（仅国内源）",
+            "proxy_address": proxy or "none",
+            "mode": "proxy" if proxy else "direct (domestic only)",
         }
 
 
-# ─── 4. 完整合规检查（一键自检）──────────────────
+# --- 4. AnomalyDetector (ADR mode) ---
 
+class AnomalyDetector:
+    """Auto-pause on consecutive failures. Inspired by Uber ADR."""
+
+    def __init__(self, max_failures: int = 3):
+        self.max = max_failures
+        self.count = 0
+        self.paused = False
+        self.reason = ""
+
+    def record(self, action: str, ok: bool, note: str = "") -> bool:
+        """Return True = should pause."""
+        if ok:
+            self.count = 0
+            return False
+        self.count += 1
+        if action in ("wait", "done", "captcha") and self.count >= self.max:
+            self.paused = True
+            self.reason = f"{self.count}x {action}: {note}"
+            log.log("ethics", "anomaly_pause", action,
+                    f"{self.count} failures", self.reason)
+            return True
+        return False
+
+    def reset(self):
+        self.count = 0
+        self.paused = False
+        self.reason = ""
+
+    def status(self) -> dict:
+        return {"paused": self.paused, "failures": self.count, "reason": self.reason}
+
+
+detector = AnomalyDetector(max_failures=3)
+
+
+# --- Compliance check ---
 
 def compliance_check() -> dict:
-    """运行合规检查，返回状态报告。"""
     return {
-        "throttle": f"基础延迟 {throttle.base}s ± {throttle.jitter}s",
-        "logging": f"{log.path} ({'存在' if log.path.exists() else '缺失'})",
+        "throttle": f"{throttle.base}s +/- {throttle.jitter}s",
+        "logging": f"{log.path} ({'exists' if log.path.exists() else 'missing'})",
         "proxy": ProxyConfig.status(),
+        "anomaly_detector": detector.status(),
         "timestamp": datetime.now().isoformat(),
     }
 
