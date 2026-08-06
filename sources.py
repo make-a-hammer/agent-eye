@@ -8,6 +8,13 @@ sources.py — agent-eye v2 搜索源配置
 
 from urllib.parse import quote
 
+# OpenBiliClaw 适配器（可选依赖）
+try:
+    from openbiliclaw_adapter import discover as obc_discover, to_trend_items as obc_to_trend
+    HAS_OBC = True
+except ImportError:
+    HAS_OBC = False
+
 
 def generate_search_urls(query: str, source_types: list[str] | None = None) -> list[str]:
     """

@@ -20,6 +20,13 @@ from typing import Callable
 
 from ethics import throttle, log
 
+# OpenBiliClaw 跨平台源（可选）
+try:
+    from openbiliclaw_adapter import discover as obc_discover, to_trend_items as obc_to_trend
+    HAS_OBC = True
+except ImportError:
+    HAS_OBC = False
+
 
 # ─── 数据模型 ────────────────────────────────────
 
@@ -90,6 +97,17 @@ def source_bilibili_hot(keyword: str = "") -> list[TrendItem]:
     except Exception:
         pass
     return items
+
+
+def source_openbiliclaw(keyword: str = "", max_results: int = 20) -> list[TrendItem]:
+    """OpenBiliClaw 跨平台推荐（B站/小红书/抖音/YouTube/知乎/X/Reddit）"""
+    if not HAS_OBC:
+        return []
+    try:
+        raw = obc_discover(query=keyword, max_results=max_results)
+        return obc_to_trend(raw)
+    except Exception:
+        return []
 
 
 def source_bilibili_search(keyword: str, max_results: int = 20) -> list[TrendItem]:
@@ -258,11 +276,14 @@ def scout(keyword: str, proxy: str | None = None, max_results: int = 20) -> list
     # 1. 拉取国外热榜（需要代理）
     overseas = source_youtube(keyword, max_results=max_results, proxy=proxy)
 
+    # 1b. OpenBiliClaw 跨平台推荐（B站/小红书/抖音等）
+    cross_platform = source_openbiliclaw(keyword, max_results=max_results)
+
     # 2. 拉取国内热榜（用于去重判断）
     domestic = source_bilibili_search(keyword, max_results=max_results)
 
-    # 3. 评分
-    results = [score_item(item, keyword, domestic) for item in overseas]
+    # 3. 评分（YouTube + OpenBiliClaw 结果）
+    results = [score_item(item, keyword, domestic) for item in overseas + cross_platform]
 
     # 4. 按搬运价值排序
     results.sort(key=lambda r: r.move_score, reverse=True)
