@@ -26,8 +26,6 @@ from vision import observe
 from hand import BrowserSession
 from thinker import decide, Decision
 from ethics import throttle, detector
-from router import route_from_obs
-from eval import StepEval, evaluate_step, evaluate_session, session_report
 from protocol import load_protocol, DebugProtocol, DebugEntry
 from repair import Repairer
 
@@ -112,8 +110,13 @@ async def run_agent(
             # ① 观察
             obs = await observe(hand.page, start_url if step == 1 else hand.page.url)
 
-            # 🚦 场景路由（reverse-skill 模式）
-            strategy = route_from_obs(obs)
+            # 🚦 快速场景检测（验证码/表单/搜索/未知）
+            url = obs.get("url", "").lower()
+            title = obs.get("title", "").lower()
+            captcha_kw = ["captcha", "verify", "验证码", "安全验证", "are you human"]
+            is_captcha = any(k in url or k in title for k in captcha_kw)
+            is_form = any(k in url for k in ["/login", "/signin", "/signup"])
+            is_search = any(k in url for k in ["/search", "/s?", "q=", "wd=", "query="])
 
             # ② 决策
             decision: Decision = decide(obs, query, llm=llm, history=history)
@@ -124,14 +127,13 @@ async def run_agent(
                 "url": obs["url"],
                 "action": decision.action,
                 "reason": decision.reason,
-                "scene": strategy.scene,
             })
 
-            # 🛡️ 异常检测（ADR 模式）
+            # 🛡️ 异常检测（ADR 模式——连续 wait/done 自动暂停）
             is_fail = decision.action in ("wait", "done")
             if detector.record(decision.action, ok=not is_fail,
-                               note=f"scene={strategy.scene}"):
-                print(f"  ⚠️ ADR 检测到异常，自动暂停: {detector.reason}")
+                               note=obs["url"]):
+                print(f"  ADR pause: {detector.reason}")
                 decision = Decision(action="done", reason=detector.reason)
 
             # ③ 执行（失败时走协议诊断-修复-重试）
