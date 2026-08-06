@@ -16,7 +16,7 @@ try:
     from playwright.async_api import async_playwright, Page
     HAS_PLAYWRIGHT = True
 except ImportError:
-    pass
+    Page = None  # type hint fallback
 
 
 class BrowserSession:
