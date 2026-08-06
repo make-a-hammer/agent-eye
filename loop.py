@@ -108,7 +108,7 @@ async def run_agent(
             throttle.wait()
 
             # ① 观察
-            obs = await observe(hand.page, start_url if step == 1 else hand.page.url)
+            obs = await observe(hand, start_url if step == 1 else hand.page.url)
 
             # 🚦 快速场景检测（验证码/表单/搜索/未知）
             url = obs.get("url", "").lower()

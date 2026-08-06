@@ -1,0 +1,24 @@
+{
+  "name": "agent-eye",
+  "version": "1.0.0",
+  "description": "Playwright persistent Chrome profile for AI agents. A Windows-native, under-200-line alternative to Ego-Lite.",
+  "main": "killdoc_reference.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/1413488953-netizen/agent-eye.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/1413488953-netizen/agent-eye/issues"
+  },
+  "homepage": "https://github.com/1413488953-netizen/agent-eye#readme",
+  "dependencies": {
+    "playwright": "^1.62.1"
+  }
+}

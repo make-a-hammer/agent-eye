@@ -84,19 +84,51 @@ def infer_source_label(netloc: str, source_type: str) -> str:
     return labels.get(source_type, f"🌐 {netloc}")
 
 
-async def observe(page, url: str) -> dict:
+async def observe(page_or_session, url: str) -> dict:
     """
     对当前页面截图 + 提取内容，返回标准化 Observation。
-    page 必须是已导航到目标 URL 的 Playwright Page 对象。
+    支持两种模式：
+      - Playwright Page 对象（直接调用 evaluate/screenshot）
+      - BrowserSession（通过 Node.js worker 提取）
     """
+    # 检测是否 Node.js worker 模式
+    if hasattr(page_or_session, '_send'):
+        return await _observe_via_worker(page_or_session, url)
+    else:
+        return await _observe_via_playwright(page_or_session, url)
+
+
+async def _observe_via_worker(session, url: str) -> dict:
+    """通过 Node.js worker 获取观察数据"""
+    resp = session._send({"action": "extract"})
+    netloc = urlparse(url).netloc
+    stype = infer_type(netloc)
+    label = infer_source_label(netloc, stype)
+
+    # 截图
+    shot = await session.shoot()
+
+    return {
+        "url": url,
+        "title": resp.get("title", url),
+        "body_snippet": resp.get("body", ""),
+        "meta_desc": resp.get("meta", ""),
+        "screenshot_path": shot,
+        "source_type": stype,
+        "source_label": label,
+    }
+
+
+async def _observe_via_playwright(page, url: str) -> dict:
+    """通过 Playwright Page 获取观察数据（原逻辑）"""
+    netloc = urlparse(url).netloc
+    stype = infer_type(netloc)
+    label = infer_source_label(netloc, stype)
+
     title = await _get_title(page)
     meta_desc = await _get_meta_desc(page)
     body = await _get_body_snippet(page)
     shot = await _screenshot(page, url)
-
-    netloc = urlparse(url).netloc
-    stype = infer_type(netloc)
-    label = infer_source_label(netloc, stype)
 
     return {
         "url": url,

@@ -1,117 +1,113 @@
 #!/usr/bin/env python3
 """
-hand.py — agent-eye v2 手组件
+hand.py — agent-eye v2 手组件（Node.js Playwright 版本）
 
-BrowserSession 封装 Playwright 原子操作：
-    navigate / click / type / scroll / wait / shoot
-
-所有操作返回 (success: bool, detail: str)。
+通过子进程与 browser_worker.js 通信，不依赖 Python greenlet。
+所有操作返回 (success: bool, detail: str)。接口兼容原 async 版本。
 """
 
+import json
+import subprocess
 import os
 import asyncio
 
-HAS_PLAYWRIGHT = False
-try:
-    from playwright.async_api import async_playwright, Page
-    HAS_PLAYWRIGHT = True
-except ImportError:
-    Page = None  # type hint fallback
+WORKER_SCRIPT = os.path.join(os.path.dirname(__file__), "browser_worker.js")
 
 
 class BrowserSession:
-    """管理一个 Playwright 浏览器会话。"""
+    """通过 Node.js 子进程管理 Playwright 浏览器会话。"""
 
     def __init__(self, headless: bool = False, timeout: int = 20000):
         self.headless = headless
         self.timeout = timeout
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page: Page | None = None
-        self._is_persistent = False
+        self._proc = None
+        self._ready = False
+        self._current_url = ""
 
-    async def __aenter__(self):
-        if not HAS_PLAYWRIGHT:
-            raise RuntimeError("Playwright 未安装: pip install playwright && playwright install chromium")
-        self._playwright = await async_playwright().start()
-        try:
-            self._context = await self._playwright.chromium.launch_persistent_context(
-                user_data_dir=os.path.expanduser("~/ego_profile"),
-                headless=self.headless,
-                viewport={"width": 1280, "height": 900},
-                locale="en-US",
-            )
-            self._is_persistent = True
-        except Exception:
-            self._browser = await self._playwright.chromium.launch(headless=True)
-            self._context = await self._browser.new_context(
-                viewport={"width": 1280, "height": 900},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            )
-        self._page = await self._context.new_page()
-        return self
+    def start(self):
+        env = os.environ.copy()
+        self._proc = subprocess.Popen(
+            ["node", WORKER_SCRIPT],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True, bufsize=1,
+            env=env,
+        )
+        line = self._proc.stdout.readline()
+        resp = json.loads(line)
+        if resp.get("ready"):
+            self._ready = True
 
-    async def __aexit__(self, *args):
-        if self._is_persistent and self._context:
-            await self._context.close()
-        elif self._browser:
-            await self._browser.close()
-        if self._playwright:
-            await self._playwright.stop()
+    def stop(self):
+        if self._proc:
+            self._send({"action": "exit"})
+            try:
+                self._proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+            self._proc = None
+
+    def _send(self, msg: dict) -> dict:
+        if not self._proc or self._proc.poll() is not None:
+            return {"ok": False, "error": "Worker process dead"}
+        self._proc.stdin.write(json.dumps(msg) + "\n")
+        self._proc.stdin.flush()
+        line = self._proc.stdout.readline()
+        if not line:
+            return {"ok": False, "error": "Worker no response"}
+        return json.loads(line)
+
+    # ── 兼容旧接口 ──────────────────────────────
 
     @property
-    def page(self) -> Page:
-        if not self._page:
-            raise RuntimeError("BrowserSession 未启动，请使用 async with")
-        return self._page
+    def page(self):
+        return self
 
-    async def navigate(self, url: str) -> tuple[bool, str]:
-        """导航到 URL。"""
-        try:
-            await self._page.goto(url, wait_until="domcontentloaded", timeout=self.timeout)
-            await self._page.wait_for_timeout(2000)
-            title = await self._page.title()
-            return True, title or url
-        except Exception as e:
-            return False, str(e)[:200]
+    @property
+    def url(self) -> str:
+        return self._current_url
 
-    async def click(self, selector: str) -> tuple[bool, str]:
-        """点击元素。"""
-        try:
-            await self._page.click(selector, timeout=self.timeout)
-            await self._page.wait_for_timeout(1000)
-            return True, f"clicked: {selector}"
-        except Exception as e:
-            return False, f"click failed ({selector}): {e}"
+    # ── 操作（async 兼容原 loop.py）──────────────
 
-    async def type_text(self, selector: str, text: str) -> tuple[bool, str]:
-        """在输入框中输入文字。"""
-        try:
-            await self._page.fill(selector, text, timeout=self.timeout)
-            return True, f"typed into {selector}"
-        except Exception as e:
-            return False, f"type failed ({selector}): {e}"
+    async def navigate(self, url: str) -> tuple:
+        self._current_url = url
+        resp = self._send({"action": "navigate", "url": url, "timeout": self.timeout})
+        return resp.get("ok", False), resp.get("title", resp.get("error", "?"))
 
-    async def scroll(self, amount: int = 500) -> tuple[bool, str]:
-        """向下滚动。"""
-        try:
-            await self._page.evaluate(f"window.scrollBy(0, {amount})")
-            await self._page.wait_for_timeout(500)
-            return True, f"scrolled {amount}px"
-        except Exception as e:
-            return False, f"scroll failed: {e}"
+    async def click(self, selector: str) -> tuple:
+        resp = self._send({"action": "click", "selector": selector})
+        return resp.get("ok", False), resp.get("selector", resp.get("error", "?"))
 
-    async def wait(self, ms: int = 2000) -> tuple[bool, str]:
-        """等待指定毫秒。"""
-        await self._page.wait_for_timeout(ms)
+    async def type_text(self, selector: str, text: str) -> tuple:
+        resp = self._send({"action": "type", "selector": selector, "text": text})
+        return resp.get("ok", False), resp.get("selector", resp.get("error", "?"))
+
+    async def scroll(self, amount: int = 500) -> tuple:
+        resp = self._send({"action": "scroll", "amount": amount})
+        return resp.get("ok", False), f"scrolled {amount}px" if resp.get("ok") else resp.get("error", "?")
+
+    async def wait(self, ms: int = 2000) -> tuple:
+        resp = self._send({"action": "wait", "ms": ms})
         return True, f"waited {ms}ms"
 
     async def shoot(self, path: str | None = None) -> str | None:
-        """截图。返回路径或 None。"""
-        try:
-            p = path or ".screenshots/latest.png"
-            await self._page.screenshot(path=p, full_page=False)
-            return p
-        except Exception:
-            return None
+        p = path or ".screenshots/latest.png"
+        resp = self._send({"action": "screenshot", "path": p})
+        return p if resp.get("ok") else None
+
+    # ── 上下文管理 ──────────────────────────────
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, *args):
+        self.stop()
+
+    async def __aenter__(self):
+        self.start()
+        return self
+
+    async def __aexit__(self, *args):
+        self.stop()
