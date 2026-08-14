@@ -1,3 +1,4 @@
 .screenshots/
 __pycache__/
 *.pyc
+docs/闲鱼选品数据分析模块.md
