@@ -22,6 +22,13 @@ try:
 except ImportError:
     HAS_TELEGRAM = False
 
+# Sci-Hub 学术源（Node.js worker 渲染绕 Cloudflare，可选）
+try:
+    from scihub_source import fetch_by_doi as sh_fetch_by_doi, to_trend_items as sh_to_trend
+    HAS_SCIHUB = True
+except ImportError:
+    HAS_SCIHUB = False
+
 
 def generate_search_urls(query: str, source_types: list[str] | None = None) -> list[str]:
     """

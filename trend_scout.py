@@ -34,6 +34,13 @@ try:
 except ImportError:
     HAS_TELEGRAM = False
 
+# Sci-Hub 学术源（Node.js worker 渲染绕 Cloudflare）
+try:
+    from scihub_source import fetch_by_doi as sh_fetch_by_doi, to_trend_items as sh_to_trend
+    HAS_SCIHUB = True
+except ImportError:
+    HAS_SCIHUB = False
+
 
 # ─── 数据模型 ────────────────────────────────────
 
@@ -135,6 +142,52 @@ def source_telegram(channel: str = "", keyword: str = "", max_results: int = 20)
     except Exception as e:
         print(f"  ⚠️ Telegram: {e}")
     return items
+
+
+def source_scihub(doi: str = "", title: str = "", max_results: int = 5) -> list[TrendItem]:
+    """Sci-Hub 学术论文——按 DOI 取 PDF（Node.js worker 绕 Cloudflare）"""
+    items = []
+    if not HAS_SCIHUB:
+        return items
+    try:
+        if doi:
+            paper = sh_fetch_by_doi(doi)
+            if paper:
+                items = sh_to_trend([paper])
+        elif title:
+            # 标题 → 先用 Crossref 查 DOI，再取论文
+            import urllib.request
+            import urllib.parse
+            q = urllib.parse.quote(title)
+            with urllib.request.urlopen(
+                f"https://api.crossref.org/works?query.bibliographic={q}&rows={max_results}&select=DOI,title",
+                timeout=15,
+            ) as resp:
+                data = json.loads(resp.read())
+            for item in data.get("message", {}).get("items", []):
+                doi_id = item.get("DOI", "")
+                if doi_id and doi_id.startswith("10."):
+                    paper = sh_fetch_by_doi(doi_id)
+                    if paper:
+                        items.extend(sh_to_trend([paper]))
+                        break  # 命中一篇就够
+        log.log("scihub", "fetch", doi or title, f"{len(items)} papers")
+    except Exception as e:
+        print(f"  ⚠️ Sci-Hub: {e}")
+
+    # dict → TrendItem 转换
+    result = []
+    for d in items:
+        try:
+            result.append(TrendItem(
+                title=d.get("title", ""),
+                url=d.get("url", ""),
+                platform="scihub",
+                views=d.get("views", 0),
+            ))
+        except Exception:
+            continue
+    return result
 
 
 def source_bilibili_search(keyword: str, max_results: int = 20) -> list[TrendItem]:

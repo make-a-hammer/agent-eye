@@ -55,7 +55,12 @@ async function handle(msg) {
                     return Array.from(els).map(e => e.textContent.trim())
                         .filter(t => t.length > 10).join('\n').slice(0, 2000);
                 });
-                return { ok: true, url, title, meta, body };
+                // raw_html 模式：返回完整页面 HTML（Sci-Hub 等需要解析 iframe/pdf 链接）
+                let html = '';
+                if (msg.raw_html) {
+                    html = await page.content();
+                }
+                return { ok: true, url, title, meta, body, html };
             }
             case 'click': {
                 const { selector } = msg;
