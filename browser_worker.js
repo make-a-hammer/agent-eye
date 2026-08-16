@@ -95,13 +95,15 @@ async function handle(msg) {
 }
 
 async function main() {
-    // 启动浏览器
+    // 有头模式：--headed 或环境变量 HEADED=1（登录墙网站需要手动登录一次）
+    const headed = process.argv.includes('--headed') || process.env.HEADED === '1';
+    // 启动浏览器（持久化 profile：~/ego_profile，登录态自动保存复用）
     browser = await chromium.launchPersistentContext(
         process.env.USERPROFILE + '/ego_profile',
         {
-            headless: true,
+            headless: !headed,
             viewport: { width: 1280, height: 900 },
-            locale: 'en-US',
+            locale: 'zh-CN',
         }
     );
     context = browser;
