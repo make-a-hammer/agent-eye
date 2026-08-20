@@ -95,15 +95,24 @@ class DoubaoBridge:
         }, timeout=timeout + 10)
         if resp.get("ok"):
             ans = resp.get("answer", "(空回答)")
-            # 清洗：去掉尾巴里夹带的用户问题原文
+            # 清洗：去掉尾巴里夹带的用户问题原文（容忍 DOM 空格/换行差异）
             q_clean = question.strip()
-            ans_clean = ans.replace(q_clean, "", 1) if q_clean in ans else ans
+            import re
+            pat = re.compile(r"\s*".join(re.escape(c) for c in q_clean) + r"\s*")
+            ans_clean = pat.sub("", ans, count=1) if q_clean else ans
             # 去掉常见前缀（问题重复/引导语）
             for pre in ["你刚才问", "你问的是", "问题：", "回答："]:
                 if ans_clean.startswith(pre):
                     ans_clean = ans_clean[len(pre):]
                     break
-            return ans_clean.strip() or "(空回答)"
+            ans_clean = ans_clean.strip() or "(空回答)"
+            # 去掉尾部豆包推荐问题（"如何…""给我推荐…"等追问句）
+            import re as _re
+            ans_clean = _re.split(r"\n\s*(?:如何|给我推荐|还有哪些|能不能|你能|你会|再生成|要不要)", ans_clean)[0]
+            ans_clean = _re.sub(r"[\s]*$", "", ans_clean)
+            # 去掉"1）…2）…"编号前缀（豆包习惯性分点，对情报展示更干净）
+            ans_clean = _re.sub(r"^[0-9０-９]）\s*", "", ans_clean)
+            return ans_clean or "(空回答)"
         return f"(豆包调用失败: {resp.get('error', '?')})"
 
     def new_chat(self) -> dict:

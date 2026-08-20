@@ -104,19 +104,28 @@ async function handle(msg) {
                 await page.keyboard.press('Enter');
 
                 // 等回答：全文 diff——比基线多出的内容就是新回复
+                // 豆包流式输出：等"新增内容稳定"（连续两次 poll 相同）才算完成
                 const deadline = Date.now() + (msg.timeout || 60000);
                 let answer = '';
+                let lastAdded = '';
+                let stableCount = 0;
                 while (Date.now() < deadline) {
-                    await humanPause(2000, 3000);
+                    await humanPause(2500, 3500);
                     const now = await extractAnswer();
                     if (now.length <= baseline.length) continue;
-                    // 新增部分 = 全文去掉基线后剩下的尾巴
-                    const added = now.slice(baseline.length).trim();
-                    // 过滤：只含用户问题本身（无新增回复）→ 继续等
-                    if (!added || added.replace(/\s+/g, '') === (msg.question || '').replace(/\s+/g, '')) continue;
-                    answer = added;
-                    break;
+                    let added = now.slice(baseline.length).trim();
+                    // 过滤：只有用户问题本身（无新增回复）→ 继续等
+                    const qOnly = (msg.question || '').replace(/\s+/g, '');
+                    if (added.replace(/\s+/g, '') === qOnly) continue;
+                    if (added === lastAdded) {
+                        stableCount++;
+                        if (stableCount >= 2) { answer = added; break; }
+                    } else {
+                        lastAdded = added;
+                        stableCount = 0;
+                    }
                 }
+                answer = answer || lastAdded;
                 return { ok: true, answer: answer || '(豆包未在时限内回答)' };
             }
             case 'new_chat': {
