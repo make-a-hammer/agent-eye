@@ -76,6 +76,12 @@ async function handle(msg) {
                 await page.waitForTimeout(500);
                 return { ok: true, amount };
             }
+            case 'js_eval': {
+                const { expr } = msg;
+                if (!page) throw new Error('Browser not started');
+                const result = await page.evaluate(expr);
+                return { ok: true, result };
+            }
             case 'wait': {
                 const { ms = 2000 } = msg;
                 await new Promise(r => setTimeout(r, ms));
@@ -104,6 +110,8 @@ async function main() {
             headless: !headed,
             viewport: { width: 1280, height: 900 },
             locale: 'zh-CN',
+            // 代理隔离：AGENT_EYE_PROXY 环境变量（如 http://127.0.0.1:10808）
+            ...(process.env.AGENT_EYE_PROXY ? { proxy: { server: process.env.AGENT_EYE_PROXY } } : {}),
         }
     );
     context = browser;
