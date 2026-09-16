@@ -136,6 +136,13 @@ async def _search_one(base: str, keyword: str, max_results: int,
     return [i for i in items if i.get("title")]
 
 
+def _norm_path(p: str) -> str:
+    """规范化路径：MSYS 风格 /d/xxx → D:/xxx（Windows 下 Python 会误解析为相对路径）。"""
+    if len(p) >= 3 and p[0] == "/" and p[2] == "/" and p[1].isalpha():
+        return f"{p[1].upper()}:{p[2:]}"
+    return p
+
+
 async def download_book(book_url: str, out_dir: str = "downloads",
                         headless: bool = True) -> str | None:
     """
@@ -143,6 +150,7 @@ async def download_book(book_url: str, out_dir: str = "downloads",
 
     流程: 打开详情页 → 找下载按钮 → 触发下载 → 保存
     """
+    out_dir = _norm_path(out_dir)
     state = _session_state()
     if not state:
         print("⚠️ 未找到登录态，下载额度受限。先运行: python zlib_login.py")
