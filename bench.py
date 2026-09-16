@@ -252,11 +252,11 @@ def compare(baseline_path: str, current: dict) -> dict:
         pct = round((delta / bv * 100), 1) if bv else None
         # 耗时类指标是"越低越好"
         better = None
-        if "ms" in k:
+        if k.endswith("_ms"):
             better = delta < 0
         elif k in ("coverage_rate", "total_items", "avg_items_per_query",
                    "evidence_binding_rate", "type_accuracy", "total_claims"):
-            better = delta > 0
+            better = delta > 0 if delta != 0 else None   # 无变化 = 中性
         diff[k] = {"baseline": bv, "current": cv, "delta": delta,
                    "pct": pct, "better": better}
     return diff
@@ -267,7 +267,7 @@ def print_comparison(diff: dict):
     print(f"\n{'指标':<24} {'基线':>10} {'当前':>10} {'变化':>10}  ")
     print("-" * 62)
     for k, v in diff.items():
-        mark = ""
+        mark = "⚪"     # 中性（无变化或未分类指标）
         if v["better"] is True:
             mark = "✅"
         elif v["better"] is False:
