@@ -146,7 +146,10 @@ def classify_query(query: str) -> dict:
     if matched is None:
         # 学术关键词兜底
         academic_kw = ["paper", "论文", "arxiv", "doi", "theorem", "定理", "algorithm", "算法",
-                       "neural", "transformer", "模型", "dataset", "数据集", "benchmark"]
+                       "neural", "transformer", "模型", "dataset", "数据集", "benchmark",
+                       # 学科主题词（无明确类型信号时的兜底判断）
+                       "技术", "原理", "机制", "理论", "效应", "应用", "量子",
+                       "物理", "化学", "生物", "材料", "半导体", "芯片"]
         matched = "research" if any(kw in q for kw in academic_kw) else "factual"
 
     cfg = dict(QUERY_TYPES[matched])
