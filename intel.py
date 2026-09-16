@@ -141,6 +141,8 @@ SOURCES = {
     "openalex_deep": _deep("openalex_deep"),   # 论文+作者+机构+引用网络
     "crossref": _deep("crossref"),             # DOI 元数据（OpenAlex 备源）
     "wikidata": _deep("wikidata"),             # 实体消歧（结构化事实）
+    "github": _deep("github"),                 # 仓库深挖（stars/语言/许可/标签）
+    "youtube_deep": _deep("youtube_deep"),     # 视频深挖（播放/时长/频道/日期）
 }
 
 

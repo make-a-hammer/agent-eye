@@ -79,8 +79,9 @@ def _infer_source_types(query: str) -> list[str]:
 # 源名对应 intel.py 的 SOURCES 字典
 QUERY_TYPES = {
     "factual":      {"sources": ["web", "wikidata"],                    "freshness": False, "authority": True,  "diversity": False},
-    "comparative":  {"sources": ["web", "openalex_deep"],               "freshness": True,  "authority": True,  "diversity": True},
+    "comparative":  {"sources": ["web", "openalex_deep", "github"],     "freshness": True,  "authority": True,  "diversity": True},
     "research":     {"sources": ["openalex_deep", "web", "trends"],      "freshness": True,  "authority": True,  "diversity": True},
+    "technical":    {"sources": ["github", "web"],                      "freshness": True,  "authority": True,  "diversity": False},
     "operational":  {"sources": ["web", "trends"],                      "freshness": True,  "authority": False, "diversity": False},
     "computational": {"sources": ["web", "openalex_deep"],              "freshness": False, "authority": True,  "diversity": False},
     "high_risk":    {"sources": ["openalex_deep", "web", "trends"],      "freshness": True,  "authority": True,  "diversity": True},
@@ -95,6 +96,9 @@ _TYPE_KEYWORDS = {
                       "how many", "percentage", "average", "总和"],
     "operational": ["下载", "登录", "注册", "安装", "购买", "预订", "填表", "提交",
                     "download", "login", "install", "buy", "book", "submit"],
+    "technical":   ["开源", "仓库", "工具", "库", "框架", "插件", "软件", "github",
+                    "repo", "repository", "代码", "pip", "npm", "import", "sdk",
+                    "library", "framework", "open source"],
     "high_risk":   ["医疗", "诊断", "法律", "诉讼", "投资", "股票", "药", "剂量",
                     "medical", "legal", "invest", "stock", "diagnosis", "处方"],
 }
@@ -116,16 +120,17 @@ def classify_query(query: str) -> dict:
     matched = None
 
     # 高风险优先（安全第一）
-    for t in ["high_risk", "operational", "computational", "comparative", "research"]:
+    for t in ["high_risk", "operational", "computational", "comparative",
+              "technical", "research"]:
         if any(kw in q for kw in _TYPE_KEYWORDS[t]):
             matched = t
             break
 
-    # 代码类特殊处理（保留原逻辑）
-    if any(kw in q for kw in ["github", "repo", "repository", "代码", "pip", "npm", "import"]):
-        cfg = dict(QUERY_TYPES["research"])
-        cfg["sources"] = ["code", "web"]
-        cfg["type"] = "code"
+    # 代码/技术类特殊处理（github 深挖源）
+    if any(kw in q for kw in ["github", "repo", "repository", "代码", "pip", "npm",
+                              "import", "开源", "仓库"]):
+        cfg = dict(QUERY_TYPES["technical"])
+        cfg["type"] = "technical"
         return cfg
 
     if matched is None:
