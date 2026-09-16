@@ -92,8 +92,8 @@ _TYPE_KEYWORDS = {
     "comparative": ["vs", "对比", "比较", "哪个好", "区别", "差异", "优缺点", "哪个更"],
     "research":    ["研究", "综述", "趋势", "现状", "进展", "论文", "paper", "survey",
                     "arxiv", "doi", "预印本", "文献", "state of the art", "最新"],
-    "computational": ["计算", "统计", "多少", "比例", "增长率", "同比", "calculate",
-                      "how many", "percentage", "average", "总和"],
+    "computational": ["计算", "统计", "有多少", "比例", "增长率", "同比", "calculate",
+                      "how many", "percentage", "average", "总和", "求和", "均值"],
     "operational": ["下载", "登录", "注册", "安装", "购买", "预订", "填表", "提交",
                     "download", "login", "install", "buy", "book", "submit"],
     "technical":   ["开源", "仓库", "工具", "库", "框架", "插件", "软件", "github",
@@ -144,13 +144,20 @@ def classify_query(query: str) -> dict:
         return cfg
 
     if matched is None:
-        # 学术关键词兜底
-        academic_kw = ["paper", "论文", "arxiv", "doi", "theorem", "定理", "algorithm", "算法",
-                       "neural", "transformer", "模型", "dataset", "数据集", "benchmark",
-                       # 学科主题词（无明确类型信号时的兜底判断）
-                       "技术", "原理", "机制", "理论", "效应", "应用", "量子",
-                       "物理", "化学", "生物", "材料", "半导体", "芯片"]
-        matched = "research" if any(kw in q for kw in academic_kw) else "factual"
+        # 事实性疑问词优先（谁/什么/哪年 → 查事实，不是做研究）
+        factual_kw = ["是谁", "是什么", "哪位", "哪个是", "哪一年", "哪年",
+                      "什么时候", "多少", "在哪", "是什么意思", "定义"]
+        if any(kw in q for kw in factual_kw):
+            matched = "factual"
+        else:
+            # 学术关键词兜底
+            academic_kw = ["paper", "论文", "arxiv", "doi", "theorem", "定理",
+                           "algorithm", "算法", "neural", "transformer", "模型",
+                           "dataset", "数据集", "benchmark",
+                           # 学科主题词（无明确类型信号时的兜底判断）
+                           "技术", "原理", "机制", "理论", "效应", "应用", "量子",
+                           "物理", "化学", "生物", "材料", "半导体", "芯片"]
+            matched = "research" if any(kw in q for kw in academic_kw) else "factual"
 
     cfg = dict(QUERY_TYPES[matched])
     cfg["type"] = matched
