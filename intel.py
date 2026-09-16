@@ -21,6 +21,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.request
 import urllib.parse
 from collections import defaultdict
@@ -146,21 +147,47 @@ SOURCES = {
 }
 
 
+def _timed(name: str, fn, query: str, max_per: int) -> tuple[list[dict], int]:
+    """计时调用单个源。"""
+    t0 = time.time()
+    try:
+        items = fn(query, max_per)
+    except Exception as e:
+        print(f"  ❌ {name:<16} 失败: {str(e)[:60]}")
+        return [], int((time.time() - t0) * 1000)
+    return items, int((time.time() - t0) * 1000)
+
+
 def collect(query: str, source_list: list[str], max_per: int) -> list[dict]:
-    """多源并行拉取（失败源自动跳过）。"""
+    """
+    多源并行拉取（失败源自动跳过）。
+
+    并行执行：总耗时 ≈ 最慢源，而非各源之和。
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     print(f"🔍 情报收集: \"{query}\"")
     print(f"   源: {', '.join(source_list)} | 每源上限: {max_per}\n")
 
-    all_items = []
-    for name in source_list:
-        fn = SOURCES.get(name)
-        if not fn:
-            print(f"  ⚠️ 未知源: {name}（可用: {', '.join(SOURCES)}）")
-            continue
-        print(f"  📡 {name} ...", end="", flush=True)
-        items = fn(query, max_per)
-        print(f" {len(items)} 条")
-        all_items.extend(items)
+    all_items: list[dict] = []
+    tasks = {}
+    t_start = time.time()
+
+    with ThreadPoolExecutor(max_workers=max(1, min(len(source_list), 6))) as ex:
+        for name in source_list:
+            fn = SOURCES.get(name)
+            if not fn:
+                print(f"  ⚠️ 未知源: {name}（可用: {', '.join(SOURCES)}）")
+                continue
+            tasks[ex.submit(_timed, name, fn, query, max_per)] = name
+
+        for fut in as_completed(tasks):
+            name = tasks[fut]
+            items, ms = fut.result()
+            print(f"  📡 {name:<16} {len(items):>3} 条  {ms/1000:>5.1f}s")
+            all_items.extend(items)
+
+    print(f"  ⏱️  并行总耗时: {time.time()-t_start:.1f}s")
 
     log.log("intel", "collect", query,
             f"{len(all_items)} items from {','.join(source_list)}",

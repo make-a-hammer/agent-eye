@@ -1,4 +1,42 @@
-.screenshots/
+# ─── 依赖 ─────────────────────────────
+node_modules/
+venv/
+.venv/
 __pycache__/
 *.pyc
-docs/闲鱼选品数据分析模块.md
+*.pyo
+
+# ─── 缓存与运行时数据（可重建，不入库）─────
+.bench/
+.cache/
+.xhs_vision/
+*_cache.json
+.api_map_cache.json
+.mirrorz_cache.json
+
+# ─── 本地数据与日志 ────────────────────
+research_log.jsonl
+*.tsv
+*.db
+*.sqlite
+
+# ─── 凭据与登录态（绝不入库）─────────────
+.env
+*_session.json
+*cookies*.json
+*cookie*.txt
+token*.txt
+
+# ─── 嵌入的第三方仓库 ──────────────────
+glm-vision/
+
+# ─── 探针/一次性脚本（保留在本地，不入库）──
+probe_*.py
+cnki_*.js
+doubao_*.js
+xianyu_*.js
+gf_*.js
+gen_desc.py
+tavily_*_probe*.py
+test_xhs_api.py
+login_site.py

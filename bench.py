@@ -60,24 +60,34 @@ def _run_one(query: str, max_per: int, use_llm: bool) -> dict:
     # 选源（复用 intel 逻辑）
     source_list = [s for s in qtype["sources"] if s in intel.SOURCES] or ["web"]
 
-    # 逐源跑，记录每源耗时和成败
+    # 逐源并行跑（与 intel.collect 一致的执行路径）
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     all_items, per_source = [], {}
-    for name in source_list:
+    t_parallel = time.time()
+
+    def _call(name: str):
         ts = time.time()
         try:
             items = intel.SOURCES[name](query, max_per)
-            per_source[name] = {"items": len(items), "ms": int((time.time()-ts)*1000),
-                                "ok": True}
-            all_items.extend(items)
+            return name, items, int((time.time()-ts)*1000), None
         except Exception as e:
-            per_source[name] = {"items": 0, "ms": int((time.time()-ts)*1000),
-                                "ok": False, "error": str(e)[:60]}
+            return name, [], int((time.time()-ts)*1000), str(e)[:60]
+
+    with ThreadPoolExecutor(max_workers=max(1, min(len(source_list), 6))) as ex:
+        for fut in as_completed([ex.submit(_call, n) for n in source_list]):
+            name, items, ms, err = fut.result()
+            per_source[name] = {"items": len(items), "ms": ms, "ok": err is None}
+            if err:
+                per_source[name]["error"] = err
+            all_items.extend(items)
 
     # 打分排序
     if all_items:
         all_items = score_and_dedup(all_items, query)
 
     retrieval_ms = int((time.time() - t0) * 1000)
+    parallel_wall_ms = int((time.time() - t_parallel) * 1000)
 
     # 缓存统计
     cache_hits = 0
@@ -100,6 +110,7 @@ def _run_one(query: str, max_per: int, use_llm: bool) -> dict:
         "sources_failed": sum(1 for v in per_source.values() if not v["ok"]),
         "total_items": len(all_items),
         "retrieval_ms": retrieval_ms,
+        "parallel_wall_ms": parallel_wall_ms,
         "cache_hits": cache_hits,
     }
 
