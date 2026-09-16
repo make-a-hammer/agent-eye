@@ -76,13 +76,14 @@ def _infer_source_types(query: str) -> list[str]:
 # ─── 查询理解分类（升级：六类路由）─────────────────
 
 # 查询类型 → 推荐数据源 + 特征标记
+# 源名对应 intel.py 的 SOURCES 字典
 QUERY_TYPES = {
-    "factual":      {"sources": ["web"],                    "freshness": False, "authority": True,  "diversity": False},
-    "comparative":  {"sources": ["web", "papers"],          "freshness": True,  "authority": True,  "diversity": True},
-    "research":     {"sources": ["papers", "web", "trends"], "freshness": True,  "authority": True,  "diversity": True},
-    "operational":  {"sources": ["web", "trends"],          "freshness": True,  "authority": False, "diversity": False},
-    "computational": {"sources": ["web", "papers"],         "freshness": False, "authority": True,  "diversity": False},
-    "high_risk":    {"sources": ["web", "papers", "trends"], "freshness": True,  "authority": True,  "diversity": True},
+    "factual":      {"sources": ["web", "wikidata"],                    "freshness": False, "authority": True,  "diversity": False},
+    "comparative":  {"sources": ["web", "openalex_deep"],               "freshness": True,  "authority": True,  "diversity": True},
+    "research":     {"sources": ["openalex_deep", "web", "trends"],      "freshness": True,  "authority": True,  "diversity": True},
+    "operational":  {"sources": ["web", "trends"],                      "freshness": True,  "authority": False, "diversity": False},
+    "computational": {"sources": ["web", "openalex_deep"],              "freshness": False, "authority": True,  "diversity": False},
+    "high_risk":    {"sources": ["openalex_deep", "web", "trends"],      "freshness": True,  "authority": True,  "diversity": True},
 }
 
 # 关键词 → 查询类型

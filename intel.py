@@ -120,10 +120,27 @@ def fetch_trends(query: str, max_results: int = 8) -> list[dict]:
         return []
 
 
+# ─── 深挖源（报告 §1/§2：一手权威层 + 结构化知识层）───
+
+def _deep(source: str):
+    """生成深挖源包装函数。"""
+    def fn(query: str, max_results: int = 5) -> list[dict]:
+        try:
+            from sources_deep import fetch_deep
+            return fetch_deep(source, query, max_results)
+        except Exception as e:
+            print(f"  ⚠️ {source}: {str(e)[:80]}")
+            return []
+    return fn
+
+
 SOURCES = {
     "web": fetch_web,
     "papers": fetch_papers,
     "trends": fetch_trends,
+    "openalex_deep": _deep("openalex_deep"),   # 论文+作者+机构+引用网络
+    "crossref": _deep("crossref"),             # DOI 元数据（OpenAlex 备源）
+    "wikidata": _deep("wikidata"),             # 实体消歧（结构化事实）
 }
 
 
