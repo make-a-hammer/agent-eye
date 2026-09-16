@@ -103,12 +103,38 @@ async def run_agent(
                 return {"success": False, "result": f"导航失败: {detail}",
                         "steps_taken": 0, "history": history}
 
+        # 🎯 停止条件升级（报告启发：边际收益递减 + 预算感知）
+        # 不再只看 max_steps——页面内容连续停滞即提前终止
+        stall_count = 0
+        last_obs_sig = ""
+        STALL_LIMIT = 3   # 连续 N 步内容无变化 → 判定停滞
+
         for step in range(1, max_steps + 1):
             # 🔒 人类节奏——每步间隔 1-3 秒
             throttle.wait()
 
             # ① 观察
             obs = await observe(hand, start_url if step == 1 else hand.page.url)
+
+            # 📉 停滞检测（边际收益递减）：页面内容签名连续相同 → 卡住了
+            import hashlib
+            sig = hashlib.md5(
+                (obs.get("title", "") + obs.get("body_snippet", "")[:2000]).encode("utf-8")
+            ).hexdigest()
+            if sig == last_obs_sig:
+                stall_count += 1
+            else:
+                stall_count = 0
+            last_obs_sig = sig
+
+            if stall_count >= STALL_LIMIT:
+                return {
+                    "success": False,
+                    "result": f"页面内容连续 {STALL_LIMIT} 步无变化，提前终止（边际收益递减）",
+                    "stop_reason": "stalled",
+                    "steps_taken": step,
+                    "history": history,
+                }
 
             # 🚦 快速场景检测（验证码/表单/搜索/未知）
             url = obs.get("url", "").lower()

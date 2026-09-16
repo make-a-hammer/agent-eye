@@ -37,7 +37,7 @@ def _chat_openai_compat(
     endpoint: str,
     api_key: str,
     model: str,
-    max_tokens: int = 1024,
+    max_tokens: int = 4096,
     temperature: float = 0.3,
 ) -> str:
     """OpenAI 兼容 API 调用（DeepSeek / OpenAI / 本地 OpenAI 兼容服务）。"""

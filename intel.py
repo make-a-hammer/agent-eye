@@ -152,29 +152,76 @@ def collect(query: str, source_list: list[str], max_per: int) -> list[dict]:
 # ─── 分析层 ──────────────────────────────────────
 
 
-ANALYZE_PROMPT = """你是情报分析师。给你一份多源收集的资料（来源标注: web/openalex/youtube/bilibili），
+ANALYZE_PROMPT = """你是情报分析师。给你一份多源收集的资料（来源标注: web/openalex/youtube/bilibili）。
+
+**核心原则：先建立 claim-evidence 映射，再写结论。** 不要把没有直接证据的说法写进去。
+
 你需要：
-1. 去重合并（同主题不同来源的条目合并为一条，保留各来源）
-2. 按主题分组，每组写 1-2 句洞察（趋势/信号/风险）
-3. 标注最重要的 3 条（最有价值的发现）
-4. 最后给一个总结（该主题当前态势 + 值得关注的方向）
+1. 去重合并（同主题不同来源的条目合并，保留各来源）
+2. 按主题分组，每组写 1-2 句洞察
+3. **为每个关键主张（claim）绑定证据**：明确它来自哪条资料的哪句话，标注支持强度
+4. 标注最重要的 3 条发现
+5. 对**证据不足或存在冲突**的主张，必须显式标注 `"confidence": "low"` 并说明原因
 
 严格输出 JSON（不要 markdown 代码块）:
 {{
   "groups": [
-    {{"topic": "主题名", "insight": "洞察", "items": ["标题1（来源）", ...]}}
+    {{
+      "topic": "主题名",
+      "insight": "洞察",
+      "claims": [
+        {{
+          "text": "这个主张的原文",
+          "evidence": [
+            {{"ref": "资料编号(如[3])", "support": "direct|partial|circumstantial"}}
+          ],
+          "confidence": "high|medium|low"
+        }}
+      ]
+    }}
   ],
   "top_picks": ["最重要的条目标题（来源）", ...],
-  "summary": "150字以内的总结"
-}}"""
+  "summary": "150字以内的总结",
+  "gaps": ["证据不足、无法判断的问题", ...]
+}}
+
+**支持强度定义**：
+- direct：资料直接陈述了该主张
+- partial：资料部分支持，或需要推断
+- circumstantial：仅有间接线索"""
+
+
+def _parse_json_lenient(raw: str) -> dict:
+    """健壮 JSON 解析：去 markdown 包裹、修截断、提取首尾大括号。"""
+    s = raw.strip()
+    # 去 ```json ... ``` 包裹
+    if s.startswith("```"):
+        s = s.split("\n", 1)[-1] if "\n" in s else s
+        if s.endswith("```"):
+            s = s[:-3]
+        s = s.strip()
+    # 提取首个 { 到最后一个 }
+    i, j = s.find("{"), s.rfind("}")
+    if i >= 0 and j > i:
+        s = s[i:j+1]
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        # 截断修复：补齐未闭合的括号
+        for suffix in ['"}]}', '"}]}}', '}]}', '}]', '}', '"]}}}', ']}}}']:
+            try:
+                return json.loads(s + suffix)
+            except json.JSONDecodeError:
+                continue
+        raise
 
 
 def analyze(query: str, items: list[dict], llm) -> dict:
-    """LLM 分析去重，输出结构化简报。"""
+    """LLM 分析去重 + Claim-Evidence 绑定，输出可审计简报。"""
     if not items:
-        return {"groups": [], "top_picks": [], "summary": "没有收集到数据"}
+        return {"groups": [], "top_picks": [], "summary": "没有收集到数据", "gaps": []}
 
-    # 压缩数据：每条约 200 字符
+    # 压缩数据：每条约 200 字符（带编号，供 evidence.ref 引用）
     compact = []
     for i, it in enumerate(items, 1):
         compact.append(
@@ -186,11 +233,12 @@ def analyze(query: str, items: list[dict], llm) -> dict:
 
     try:
         raw = llm(ANALYZE_PROMPT, user_msg)
-        data = json.loads(raw)
+        data = _parse_json_lenient(raw)
         return {
             "groups": data.get("groups", []),
             "top_picks": data.get("top_picks", []),
             "summary": data.get("summary", ""),
+            "gaps": data.get("gaps", []),
         }
     except Exception as e:
         # LLM 挂了就降级：直接按源分组
@@ -209,7 +257,7 @@ def analyze(query: str, items: list[dict], llm) -> dict:
 
 
 def print_report(query: str, report: dict, items: list[dict]):
-    """终端友好输出。"""
+    """终端友好输出（含 claim-evidence 展示）。"""
     print(f"\n{'='*60}")
     print(f"  📋 情报简报 — \"{query}\"")
     print(f"{'='*60}")
@@ -218,31 +266,57 @@ def print_report(query: str, report: dict, items: list[dict]):
 
     for g in report["groups"]:
         print(f"▌{g['topic']}")
-        print(f"   {g['insight']}")
+        if g.get("insight"):
+            print(f"   {g['insight']}")
+
+        # Claim-Evidence 绑定展示
+        for c in g.get("claims", [])[:4]:
+            conf = c.get("confidence", "?")
+            mark = {"high": "🟢", "medium": "🟡", "low": "🔴"}.get(conf, "⚪")
+            print(f"   {mark} {c.get('text', '')}")
+            refs = []
+            for ev in c.get("evidence", [])[:3]:
+                sup = {"direct": "直接", "partial": "部分", "circumstantial": "间接"}.get(
+                    ev.get("support", ""), ev.get("support", ""))
+                refs.append(f"{ev.get('ref','?')}({sup})")
+            if refs:
+                print(f"      └ 证据: {', '.join(refs)}")
+
+        # 兼容旧格式
         for it in g.get("items", [])[:5]:
             print(f"   • {it}")
         print()
 
-    if report["top_picks"]:
+    if report.get("top_picks"):
         print("⭐ 最重要的发现:")
         for p in report["top_picks"][:3]:
             print(f"   • {p}")
 
+    # 证据缺口（报告最有价值的部分之一）
+    if report.get("gaps"):
+        print("\n⚠️ 证据缺口（无法从当前资料判断）:")
+        for gp in report["gaps"][:5]:
+            print(f"   • {gp}")
+
     print(f"\n{'='*60}")
-    print(f"  来源明细（{len(items)} 条）:")
+    print(f"  来源明细（{len(items)} 条，按综合分排序）:")
     for it in items[:15]:
         src = it["source"]
-        print(f"   [{src}] {it['title'][:70]}")
-        if it["url"]:
+        score = it.get("_score")
+        s = f" [{score:.0f}分]" if score is not None else ""
+        print(f"   [{src}]{s} {it['title'][:65]}")
+        if it.get("url"):
             print(f"        {it['url'][:100]}")
 
 
 def to_json(query: str, report: dict, items: list[dict]) -> str:
     return json.dumps({
         "query": query,
+        "query_type": report.get("query_type", ""),
         "summary": report["summary"],
         "groups": report["groups"],
         "top_picks": report["top_picks"],
+        "gaps": report.get("gaps", []),
         "items": items,
     }, ensure_ascii=False, indent=2)
 
@@ -253,39 +327,63 @@ def to_json(query: str, report: dict, items: list[dict]) -> str:
 def main():
     p = argparse.ArgumentParser(description="agent-eye 情报简报")
     p.add_argument("query", help="情报主题")
-    p.add_argument("--sources", default="web,papers,trends",
-                   help="数据源列表，逗号分隔（web,papers,trends）")
+    p.add_argument("--sources", default="",
+                   help="数据源列表，逗号分隔（web,papers,trends）；留空=自动分类选择")
     p.add_argument("--max", type=int, default=8, help="每源最多条数")
     p.add_argument("--json", action="store_true", help="JSON 输出")
     p.add_argument("--no-llm", action="store_true", help="跳过 LLM 分析（原始分组）")
     args = p.parse_args()
 
-    source_list = [s.strip() for s in args.sources.split(",") if s.strip()]
+    # 查询理解分类 → 决定源 + 加权特征
+    from sources import classify_query, score_and_dedup
+    qtype = classify_query(args.query)
+    print(f"🧭 查询类型: {qtype['type']} | 加权: "
+          f"时效={'✓' if qtype.get('freshness') else '✗'} "
+          f"权威={'✓' if qtype.get('authority') else '✗'} "
+          f"多样性={'✓' if qtype.get('diversity') else '✗'}")
+
+    if args.sources:
+        source_list = [s.strip() for s in args.sources.split(",") if s.strip()]
+    else:
+        # 自动选源，过滤掉本模块不支持的（如 code）
+        source_list = [s for s in qtype["sources"] if s in SOURCES]
+        if not source_list:
+            source_list = ["web"]
+
     items = collect(args.query, source_list, args.max)
+
+    # 多源结果统一打分 + 多样性降权
+    if items:
+        items = score_and_dedup(items, args.query)
 
     if args.no_llm:
         groups = defaultdict(list)
         for it in items:
             groups[it["source"]].append(f"{it['title']}（{it['source']}）")
         report = {
+            "query_type": qtype["type"],
             "groups": [{"topic": k, "insight": "", "items": v} for k, v in groups.items()],
             "top_picks": [],
             "summary": f"共收集 {len(items)} 条（未启用 LLM 分析）",
+            "gaps": [],
         }
     else:
         from llm_client import create_llm
         try:
             llm = create_llm(provider="deepseek")
             report = analyze(args.query, items, llm)
+            report["query_type"] = qtype["type"]
         except Exception as e:
             print(f"  ⚠️ LLM 不可用（{e}），降级为原始分组")
             groups = defaultdict(list)
             for it in items:
                 groups[it["source"]].append(f"{it['title']}（{it['source']}）")
             report = {
+                "query_type": qtype["type"],
                 "groups": [{"topic": k, "insight": "", "items": v} for k, v in groups.items()],
                 "top_picks": [],
                 "summary": f"共收集 {len(items)} 条（LLM 降级）",
+                "gaps": [],
             }
 
     if args.json:
