@@ -104,6 +104,13 @@ _TYPE_KEYWORDS = {
 }
 
 
+# computational 例外：这些是复合名词，不代表计算意图
+_COMPUTATIONAL_EXCEPTIONS = [
+    "量子计算", "云计算", "边缘计算", "计算器", "计算机", "科学计算",
+    "计算机视觉", "计算机科学", "计算化学", "量子计算机", "高性能计算",
+]
+
+
 def classify_query(query: str) -> dict:
     """
     查询理解分类（六类），决定用哪些源 + 加权特征。
@@ -123,6 +130,9 @@ def classify_query(query: str) -> dict:
     for t in ["high_risk", "operational", "computational", "comparative",
               "technical", "research"]:
         if any(kw in q for kw in _TYPE_KEYWORDS[t]):
+            # computational 例外：复合名词（量子计算/云计算）不等于计算意图
+            if t == "computational" and any(ex in q for ex in _COMPUTATIONAL_EXCEPTIONS):
+                continue
             matched = t
             break
 
