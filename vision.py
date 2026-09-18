@@ -85,23 +85,24 @@ def infer_source_label(netloc: str, source_type: str) -> str:
     return labels.get(source_type, f"🌐 {netloc}")
 
 
-async def observe(page_or_session, url: str) -> dict:
+async def observe(page_or_session, url: str, query: str = "") -> dict:
     """
     对当前页面截图 + 提取内容，返回标准化 Observation。
     支持两种模式：
       - Playwright Page 对象（直接调用 evaluate/screenshot）
       - BrowserSession（通过 Node.js worker 提取）
+    query 会透传给后端 —— camofox 用它做「关键词附近取窗口」，避免长页面被截断切掉目标。
     """
     # 检测是否 Node.js worker 模式
     if hasattr(page_or_session, '_send'):
-        return await _observe_via_worker(page_or_session, url)
+        return await _observe_via_worker(page_or_session, url, query)
     else:
         return await _observe_via_playwright(page_or_session, url)
 
 
-async def _observe_via_worker(session, url: str) -> dict:
-    """通过 Node.js worker 获取观察数据"""
-    resp = session._send({"action": "extract"})
+async def _observe_via_worker(session, url: str, query: str = "") -> dict:
+    """通过 Node.js worker 获取观察数据（query 透传给后端做关键词窗口定位）"""
+    resp = session._send({"action": "extract", "query": query})
     netloc = urlparse(url).netloc
     stype = infer_type(netloc)
     label = infer_source_label(netloc, stype)

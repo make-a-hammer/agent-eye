@@ -122,8 +122,9 @@ async def run_agent(
             # 🔒 人类节奏——每步间隔 1-3 秒
             throttle.wait()
 
-            # ① 观察
-            obs = await observe(hand, start_url if step == 1 else hand.page.url)
+            # ① 观察（带 query —— 长页面要在关键词附近取窗口，否则截断会切掉目标）
+            obs = await observe(hand, start_url if step == 1 else hand.page.url,
+                                query=query)
 
             # 📉 停滞检测（边际收益递减）：页面内容签名连续相同 → 卡住了
             import hashlib

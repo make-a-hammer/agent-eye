@@ -188,7 +188,8 @@ class CamofoxSession:
                 self._last_snapshot = snap.get("snapshot") or ""
                 self._current_url = snap.get("url") or self._current_url
                 return {"ok": True, "title": self._title(), "url": self._current_url,
-                        "body": self._body_text(msg.get("max_chars", 2000)),
+                        "body": self._body_text(msg.get("max_chars", 2000),
+                                                msg.get("query", "")),
                         "meta": "", "refsCount": snap.get("refsCount"),
                         "refs": self.refs()}
 
@@ -259,18 +260,20 @@ class CamofoxSession:
         except Exception:  # noqa: BLE001
             pass
 
-    def _body_text(self, max_chars: int = 2000) -> str:
+    def _body_text(self, max_chars: int = 2000, query: str = "") -> str:
         """
         取正文文本（供 LLM 阅读）。
 
-        ⚠️ 为什么不能直接用 aria 快照 / body.innerText 截断：大页面的快照与
-        innerText **开头全是导航栏、侧栏、搜索建议**（实测百度结果页快照 79914
-        字符、body.innerText 4382 字符，前 2000 全在导航区，结果条目在后面）。
-        所以：先试语义内容容器 → 再回退「最大的子容器」→ 最后才是 body。
+        ⚠️ 两个坑都在真实网站踩过：
+        ① 大页面快照/innerText **开头全是导航栏、侧栏、搜索建议**（百度结果页快照
+           79914 字符，前 2000 全在导航区）→ 先试语义容器 → 再回退「最大子容器」。
+        ② **目标在截断窗口之外**（长文档）→ 带 query 时以关键词为中心取窗口，
+           否则 t8_deep_keyword 那种「关键词在 3800 字处」会被直接切掉。
         """
         n = str(int(max_chars))
         js = ("(() => {"
               "const N=" + n + ";"
+              "const Q=" + json.dumps((query or "").strip().lower()) + ";"
               "const cand=document.querySelectorAll('main,article,[role=\"main\"],"
               "#content_left,#content,.content,#results,.results');"
               "let best=null,bl=0;"
@@ -283,6 +286,12 @@ class CamofoxSession:
               "  });"
               "}"
               "const txt=best?(best.innerText||''):((document.body.innerText)||'');"
+              "const low=txt.toLowerCase();"
+              "const hit=Q?low.indexOf(Q):-1;"
+              "if(hit>N){"
+              "  const s=Math.max(0,hit-Math.floor(N/3));"
+              "  return '[...前文已省略...]\\n'+txt.slice(s,s+N);"
+              "}"
               "return txt.slice(0,N);"
               "})()")
         try:
