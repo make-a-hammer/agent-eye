@@ -175,6 +175,7 @@ class CamofoxSession:
             if action == "navigate":
                 r = self._c.navigate(self._tab, msg["url"])
                 self._current_url = r.get("url") or msg["url"]
+                self._refresh()   # 导航后取快照 → refs() 才有元素引用（否则 refs 为空）
                 return {"ok": bool(r.get("navigationOk", True)),
                         "title": self._title(), "url": self._current_url,
                         "httpStatus": r.get("httpStatus")}
@@ -183,19 +184,21 @@ class CamofoxSession:
                 snap = self._c.snapshot(self._tab)
                 self._last_snapshot = snap.get("snapshot") or ""
                 self._current_url = snap.get("url") or self._current_url
-                return {"ok": True, "title": self._title(),
+                return {"ok": True, "title": self._title(), "url": self._current_url,
                         "body": _snapshot_to_text(self._last_snapshot,
                                                   msg.get("max_chars", 2000)),
                         "meta": "", "refsCount": snap.get("refsCount")}
 
             if action == "click":
                 self._c.click(self._tab, ref=msg.get("ref"), selector=msg.get("selector"))
+                self._refresh()   # 点击可能触发导航 → 刷新 URL/快照
                 return {"ok": True, "selector": msg.get("ref") or msg.get("selector")}
 
             if action == "type":
                 self._c.type_text(self._tab, msg.get("text", ""),
                                   ref=msg.get("ref"), selector=msg.get("selector"),
                                   submit=msg.get("submit", False))
+                self._refresh()   # 提交可能触发导航
                 return {"ok": True, "selector": msg.get("ref") or msg.get("selector")}
 
             if action == "scroll":
@@ -243,6 +246,15 @@ class CamofoxSession:
         except Exception:  # noqa: BLE001
             pass
         return self._current_url
+
+    def _refresh(self) -> None:
+        """点击/输入后刷新快照与当前 URL —— 交互后页面通常变了，agent 下一步就要观察。"""
+        try:
+            snap = self._c.snapshot(self._tab)
+            self._last_snapshot = snap.get("snapshot") or self._last_snapshot
+            self._current_url = snap.get("url") or self._current_url
+        except Exception:  # noqa: BLE001
+            pass
 
     # ── async 操作（与 BrowserSession 同名同签名）──
     async def navigate(self, url: str) -> tuple:

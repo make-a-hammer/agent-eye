@@ -162,6 +162,198 @@ async def run_one(task: dict, url: str, llm, headless: bool,
     }
 
 
+# ── 交互任务集：2 个，测「元素引用 vs CSS selector」能否完成真实交互 ──
+# 这两个任务**不走 run_agent**（fallback 不会主动点击），直接测 session 接口。
+# 这是能证明 camofox 元素引用价值的最小实验：同一意图，两种定位策略。
+INTERACT_TASKS = [
+    {
+        "id": "t6_click_link",
+        "desc": "点击链接跳转",
+        "pages": {
+            "t6_click_link.html": (
+                '<html><head><title>Start</title></head><body>'
+                '<h1>Start Page</h1>'
+                '<a href="t6_target.html">Go to target page</a>'
+                '</body></html>'),
+            "t6_target.html": (
+                '<html><head><title>Target</title></head><body>'
+                '<h1>Target Page</h1><p>you arrived</p></body></html>'),
+        },
+        "entry": "t6_click_link.html",
+        "assert_url_contains": "t6_target",
+    },
+    {
+        "id": "t7_fill_form",
+        "desc": "填表并提交",
+        "pages": {
+            "t7_fill_form.html": (
+                '<html><head><title>Form</title></head><body>'
+                '<h1>Search</h1>'
+                '<form action="t7_result.html" method="get">'
+                '<input type="text" name="q" placeholder="keyword">'
+                '<button type="submit">Go</button>'
+                '</form></body></html>'),
+            "t7_result.html": (
+                '<html><head><title>Result</title></head><body>'
+                '<h1>Result Page</h1><p>search done</p></body></html>'),
+        },
+        "entry": "t7_fill_form.html",
+        "assert_url_contains": "t7_result",
+    },
+    {
+        "id": "t8_pick_by_name",
+        "desc": "导航栏陷阱里精确点目标（语义定位 vs 默认选第一个 a）",
+        "pages": {
+            "t8_pick_by_name.html": (
+                '<html><head><title>Nav Trap</title></head><body>'
+                '<nav><a href="/">Home</a><a href="/about">About</a></nav>'
+                '<h1>Article</h1><p>content here</p>'
+                '<a href="t8_target.html">Read the full article</a>'
+                '</body></html>'),
+            "t8_target.html": (
+                '<html><head><title>T8 Target</title></head><body>'
+                '<h1>Arrived at target</h1></body></html>'),
+        },
+        "entry": "t8_pick_by_name.html",
+        "assert_url_contains": "t8_target",
+    },
+]
+
+
+def _cur_url(hand) -> str:
+    """交互后取真实当前 URL：走一次 extract（两个后端都返回 url）。"""
+    try:
+        r = hand._send({"action": "extract"})
+        return (r or {}).get("url") or getattr(hand, "url", "") or ""
+    except Exception:  # noqa: BLE001
+        return getattr(hand, "url", "") or ""
+
+
+async def run_interact(task: dict, base_url: str, engine: str) -> dict:
+    """
+    交互任务：直接测 session 接口。
+    camofox 走**元素引用**（refs() → e1/e2），playwright 走 CSS selector ——
+    比的是「同一意图，两种定位策略谁更靠得住」。
+    """
+    from hand import BrowserSession
+    if engine == "camofox":
+        from hand import CamofoxSession
+        sess = CamofoxSession()
+    else:
+        sess = BrowserSession(headless=True)
+
+    t0 = time.time()
+    used = ""
+    fail = ""
+    final_url = ""
+
+    def out(success: bool) -> dict:
+        return {"id": task["id"], "desc": task["desc"], "engine": engine,
+                "success": success, "wall_ms": int((time.time() - t0) * 1000),
+                "used": used, "detail": fail or ("OK" if success else "未达成"),
+                "final_url": final_url}
+
+    try:
+        async with sess as hand:
+            ok, detail = await hand.navigate(f"{base_url}/{task['entry']}")
+            if not ok:
+                fail = f"导航失败: {detail}"
+                return out(False)
+
+            if task["id"] == "t6_click_link":
+                if engine == "camofox":
+                    link = next((r for r in hand.refs() if r["role"] == "link"), None)
+                    if not link:
+                        fail = "快照里没有 link 引用"
+                        return out(False)
+                    used = f"ref {link['ref']} ({link['name'][:22]})"
+                    await hand.click(link["ref"])
+                else:
+                    used = "CSS 'a'"
+                    await hand.click("a")
+
+            elif task["id"] == "t7_fill_form":
+                if engine == "camofox":
+                    box = next((r for r in hand.refs() if r["role"] == "textbox"), None)
+                    if not box:
+                        fail = "快照里没有 textbox 引用"
+                        return out(False)
+                    used = f"ref {box['ref']} (textbox) + "
+                    await hand.type_text(box["ref"], "test")
+                    btn = next((r for r in hand.refs() if r["role"] == "button"), None)
+                    if btn:
+                        used += f"ref {btn['ref']} (button)"
+                        await hand.click(btn["ref"])
+                    else:
+                        used += "submit=True"
+                        await hand.type_text(box["ref"], "\n", submit=True)
+                else:
+                    used = "CSS input[name=q] + button"
+                    await hand.type_text("input[name=q]", "test")
+                    await hand.click("button")
+
+            elif task["id"] == "t8_pick_by_name":
+                if engine == "camofox":
+                    # 语义定位：从快照引用表里按**名字**找目标
+                    link = next((r for r in hand.refs()
+                                 if "full article" in r["name"].lower()), None)
+                    if not link:
+                        names = [r["name"][:18] for r in hand.refs()]
+                        fail = f"引用表里没有目标链接（现有: {names[:6]}）"
+                        return out(False)
+                    used = f"ref {link['ref']} ({link['name'][:24]})"
+                    await hand.click(link["ref"])
+                else:
+                    # 结构定位：最自然的默认 —— 第一个 <a>（这里会命中导航栏 Home）
+                    used = "CSS 'a'（默认选第一个）"
+                    await hand.click("a")
+
+            final_url = _cur_url(hand)
+            success = task["assert_url_contains"] in (final_url or "")
+            if not success:
+                fail = f"URL 未含 '{task['assert_url_contains']}'"
+            return out(success)
+    except Exception as e:  # noqa: BLE001
+        fail = f"EXCEPTION {type(e).__name__}: {e}"
+        return out(False)
+
+
+async def run_interact_suite(args, tmpdir: Path, base_url: str) -> int:
+    """交互层基线：对比两种定位策略。"""
+    print(f"🖱  交互层基线：{len(INTERACT_TASKS)} 个任务（engine={args.engine}）\n")
+    results = []
+    for task in INTERACT_TASKS:
+        for name, html in task["pages"].items():
+            (tmpdir / name).write_text(html, encoding="utf-8")
+        res = await run_interact(task, base_url, args.engine)
+        results.append(res)
+        flag = "✅" if res["success"] else "❌"
+        print(f"  {flag} {res['id']:<15} {res['wall_ms']:>6}ms")
+        print(f"       定位: {res['used']}")
+        print(f"       结果: {res['detail'][:58]}")
+        print(f"       URL : {res['final_url'][-46:]}")
+
+    n_ok = sum(1 for r in results if r["success"])
+    metrics = {
+        "tasks": len(results),
+        "interact_success_rate": round(n_ok / len(results), 3) if results else 0.0,
+        "success_n": f"{n_ok}/{len(results)}",
+        "avg_wall_ms": int(statistics.mean([r["wall_ms"] for r in results])) if results else 0,
+    }
+    print("\n" + "=" * 70)
+    print(f"📊 交互成功率 {metrics['success_n']}   平均耗时 {metrics['avg_wall_ms']}ms")
+
+    if args.save:
+        BENCH_DIR.mkdir(exist_ok=True)
+        out = BENCH_DIR / f"baseline_交互层_{args.save}.json"
+        out.write_text(json.dumps(
+            {"timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+             "engine": args.engine, "metrics": metrics, "results": results},
+            ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"💾 已存 {out}")
+    return 0
+
+
 def verdict(res: dict) -> str:
     """判定 PASS/FAIL。"""
     if res["expect"] == "success":
@@ -173,6 +365,16 @@ def verdict(res: dict) -> str:
 
 
 async def main_async(args) -> int:
+    tmppath = tempfile.mkdtemp(prefix="browsebench_")
+    tmpdir = Path(tmppath)
+    base_url, httpd = serve_dir(tmpdir)   # camofox 拒绝 file://，夹具走本地 HTTP
+
+    # ── 交互层模式（--interact）：不走 run_agent，直接测 session 接口 ──
+    if args.interact:
+        rc = await run_interact_suite(args, tmpdir, base_url)
+        httpd.shutdown()
+        return rc
+
     llm = None  # --fast / 默认：无 LLM fallback 路径
     if not args.fast:
         try:
@@ -181,10 +383,6 @@ async def main_async(args) -> int:
             print("• 使用 LLM 决策")
         except Exception as e:  # noqa: BLE001
             print(f"• LLM 不可用（{type(e).__name__}）→ 回落 fallback 路径")
-
-    tmppath = tempfile.mkdtemp(prefix="browsebench_")
-    tmpdir = Path(tmppath)
-    base_url, httpd = serve_dir(tmpdir)   # camofox 拒绝 file://，夹具走本地 HTTP
 
     tasks = list(TASKS)
     if args.live:
@@ -301,6 +499,8 @@ def main() -> int:
     ap.add_argument("--show", dest="headless", action="store_false", help="显示浏览器窗口")
     ap.add_argument("--engine", default="playwright", choices=["playwright", "camofox"],
                     help="浏览器后端（camofox 需先 bash camofox/start.sh）")
+    ap.add_argument("--interact", action="store_true",
+                    help="交互层模式：测点击/填表（元素引用 vs CSS selector）")
     args = ap.parse_args()
     return asyncio.run(main_async(args))
 
