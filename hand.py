@@ -187,7 +187,8 @@ class CamofoxSession:
                 return {"ok": True, "title": self._title(), "url": self._current_url,
                         "body": _snapshot_to_text(self._last_snapshot,
                                                   msg.get("max_chars", 2000)),
-                        "meta": "", "refsCount": snap.get("refsCount")}
+                        "meta": "", "refsCount": snap.get("refsCount"),
+                        "refs": self.refs()}
 
             if action == "click":
                 self._c.click(self._tab, ref=msg.get("ref"), selector=msg.get("selector"))

@@ -43,7 +43,7 @@ SYSTEM_PROMPT = textwrap.dedent("""\
     "content": "提取到的内容文本（仅 extract 时）",
     "search_query": "搜索关键词（仅 search 时）",
     "target_url": "目标链接（仅 navigate 时）",
-    "selector": "CSS 选择器（仅 navigate 时）",
+    "selector": "元素引用（如 e3）或 CSS 选择器（仅 navigate 时）",
     "delay_ms": 2000
 }
 
@@ -53,6 +53,11 @@ SYSTEM_PROMPT = textwrap.dedent("""\
 - navigate: 找到了相关链接，需要点进去 → 提供链接和选择器
 - wait: 遇到验证码/反爬/加载中 → 等待后重试
 - done: 任务已完成或不可能完成 → 结束
+
+定位元素的优先级（重要）：
+1. 若消息里有「可交互元素」列表，**优先把它的 ref 填进 selector**（如 "e3"）——
+   语义定位（按名字）比 CSS 按位置选，在导航栏/列表页里可靠得多。
+2. 没有该列表时，才用 CSS 选择器（如 "a.read-more"）。
 """)
 
 
@@ -65,6 +70,12 @@ def make_user_message(obs: dict, query: str, history: list[dict] | None = None) 
         f"描述: {obs.get('meta_desc', '?')}",
         f"正文预览:\n{obs.get('body_snippet', '')[:1000]}",
     ]
+    # 可交互元素（camofox 后端提供）→ 让 LLM 用 ref 而不是猜 CSS
+    inter = obs.get("interactive") or []
+    if inter:
+        lines = [f"  [{e.get('ref', '?')}] {e.get('role', '?')}: {e.get('name', '')}"
+                 for e in inter[:25]]
+        parts.append("## 可交互元素（点击时优先把 ref 填进 selector）\n" + "\n".join(lines))
     if history:
         recent = history[-5:]  # 只保留最近 5 步
         parts.append(f"## 之前尝试过\n{json.dumps(recent, ensure_ascii=False, indent=2)}")

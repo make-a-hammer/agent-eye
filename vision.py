@@ -13,6 +13,7 @@ vision.py — agent-eye v2 眼睛组件
         "meta_desc": str,
         "screenshot_path": str,  # 截图文件路径
         "source_type": str,      # academic/github/paper/forum/web
+        "interactive": list,     # 可交互元素 [{ref, role, name}]（camofox 后端才有）
     }
 """
 
@@ -116,6 +117,7 @@ async def _observe_via_worker(session, url: str) -> dict:
         "screenshot_path": shot,
         "source_type": stype,
         "source_label": label,
+        "interactive": resp.get("refs") or [],   # camofox 的元素引用表
     }
 
 
@@ -138,4 +140,5 @@ async def _observe_via_playwright(page, url: str) -> dict:
         "screenshot_path": shot,
         "source_type": stype,
         "source_label": label,
+        "interactive": [],   # Playwright 链路不产出元素引用
     }
