@@ -246,6 +246,15 @@ class Camofox:
         return self._req("POST", f"/tabs/{tab_id}/extract",
                          {"userId": self.user_id, "schema": schema})
 
+    def evaluate(self, tab_id: str, expression: str) -> Any:
+        """
+        在页面上下文执行 JS，返回 result。
+        注意：aria 快照不含 <title>，所以拿 doctitle 只能靠这个。
+        """
+        r = self._req("POST", f"/tabs/{tab_id}/evaluate",
+                      {"userId": self.user_id, "expression": expression})
+        return r.get("result") if isinstance(r, dict) else r
+
 
 # ── 自测 ─────────────────────────────────────────────────────
 def _selftest(base: str) -> int:

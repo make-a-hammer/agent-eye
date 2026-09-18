@@ -66,6 +66,7 @@ async def run_agent(
     llm: Callable[[str, str], str] | None = None,
     max_steps: int = 10,
     headless: bool = False,
+    engine: str = "playwright",
 ) -> dict:
     """
     运行 agent-eye 主循环。
@@ -75,7 +76,9 @@ async def run_agent(
         query: 用户想找什么（自然语言）
         llm: LLM 决策函数 (system_prompt, user_message) -> str
         max_steps: 最大循环步数，防止无限循环
-        headless: 是否无头模式
+        headless: 是否无头模式（仅 playwright 引擎用）
+        engine: 浏览器后端 —— "playwright"（browser_worker.js）| "camofox"
+                camofox 需要先 `bash camofox/start.sh`；它给 aria 快照 + 元素引用
 
     Returns:
         {
@@ -88,7 +91,13 @@ async def run_agent(
     history: list[dict] = []
     protocol = load_protocol()
 
-    async with BrowserSession(headless=headless) as hand:
+    if engine == "camofox":
+        from hand import CamofoxSession
+        session = CamofoxSession()
+    else:
+        session = BrowserSession(headless=headless)
+
+    async with session as hand:
         repairer = Repairer(hand)
 
         # Step 0: 导航到起始页（带协议兜底）

@@ -31,10 +31,13 @@ browse_bench.py — agent-eye 浏览层基线（"像人一样浏览"能力评测
 
 import argparse
 import asyncio
+import functools
+import http.server
 import json
 import statistics
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -43,6 +46,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from loop import run_agent  # noqa: E402
 
 BENCH_DIR = Path(__file__).resolve().parent / ".bench"
+
+
+class _QuietHandler(http.server.SimpleHTTPRequestHandler):
+    """只读静态服务，静默日志（camofox 拒绝 file://，夹具必须走 http）。"""
+
+    def log_message(self, *args):  # noqa: D102
+        pass
+
+
+def serve_dir(directory: Path) -> tuple:
+    """在随机端口起本地静态服务器，返回 (base_url, httpd)。"""
+    handler = functools.partial(_QuietHandler, directory=str(directory))
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{httpd.server_address[1]}", httpd
 
 # ── 任务集：5 个，覆盖 观察 / 判断 / 鲁棒 / 边界 ──────────────────────
 TASKS = [
@@ -98,7 +116,8 @@ LIVE_PROBES = [
 ]
 
 
-async def run_one(task: dict, url: str, llm, headless: bool) -> dict:
+async def run_one(task: dict, url: str, llm, headless: bool,
+                  engine: str = "playwright") -> dict:
     """跑单个任务，返回结构化结果。"""
     t0 = time.time()
     steps: list[float] = []
@@ -107,6 +126,7 @@ async def run_one(task: dict, url: str, llm, headless: bool) -> dict:
         r = await run_agent(
             url, task["query"], llm=llm,
             max_steps=task.get("max_steps", 3), headless=headless,
+            engine=engine,
         )
     except Exception as e:  # noqa: BLE001 —— 基线必须记录崩溃而非被它中断
         r = {"success": False, "steps_taken": 0, "history": [],
@@ -164,6 +184,7 @@ async def main_async(args) -> int:
 
     tmppath = tempfile.mkdtemp(prefix="browsebench_")
     tmpdir = Path(tmppath)
+    base_url, httpd = serve_dir(tmpdir)   # camofox 拒绝 file://，夹具走本地 HTTP
 
     tasks = list(TASKS)
     if args.live:
@@ -171,18 +192,18 @@ async def main_async(args) -> int:
             tasks.append({**p, "html": None, "_live_url": p["url"], "desc": f"[live] {p['id']}"})
 
     results = []
-    print(f"🖥  浏览层基线：{len(tasks)} 个任务\n")
+    print(f"🖥  浏览层基线：{len(tasks)} 个任务（engine={args.engine}）\n")
     for task in tasks:
         if task.get("_live_url"):
             url = task["_live_url"]
         elif task["html"] is None:
-            url = (tmpdir / "does_not_exist.html").as_uri()
+            url = f"{base_url}/does_not_exist.html"
         else:
             p = tmpdir / f"{task['id']}.html"
             p.write_text(task["html"], encoding="utf-8")
-            url = p.as_uri()
+            url = f"{base_url}/{task['id']}.html"
 
-        res = await run_one(task, url, llm, args.headless)
+        res = await run_one(task, url, llm, args.headless, engine=args.engine)
         results.append(res)
         v = verdict(res)
         flag = "✅" if v == "PASS" else "❌"
@@ -191,7 +212,10 @@ async def main_async(args) -> int:
 
     # ── 指标聚合 ──────────────────────────────────────────────
     n = len(results)
-    n_succ = sum(1 for r in results if r["success"])
+    # success_rate 只统计「期望成功」的任务 —— graceful 任务的 success 语义不同
+    # （404 页「成功打开」和「优雅失败」都是正确结果，不该混进成功率）
+    succ_tasks = [r for r in results if r["expect"] == "success"]
+    n_succ = sum(1 for r in succ_tasks if r["success"])
     n_graceful = sum(1 for r in results if r["graceful"])
     n_stall = sum(1 for r in results if r["stop_reason"] == "stalled")
     total_steps = sum(r["steps"] for r in results)
@@ -199,7 +223,8 @@ async def main_async(args) -> int:
     walls = [r["wall_ms"] for r in results]
 
     metrics = {
-        "success_rate": round(n_succ / n, 3),
+        "success_rate": round(n_succ / len(succ_tasks), 3) if succ_tasks else 0.0,
+        "success_n": f"{n_succ}/{len(succ_tasks)}",
         "avg_steps": round(total_steps / n, 2),
         "step_efficiency": round(n_succ / total_steps, 3) if total_steps else 0.0,
         "graceful_rate": round(n_graceful / n, 3),
@@ -248,8 +273,12 @@ async def main_async(args) -> int:
                 if k in ("tasks",) or k not in om:
                     continue
                 o = om[k]
+                # 非数值指标（如 success_n="2/2"）不做减法
+                if not isinstance(v, (int, float)) or not isinstance(o, (int, float)):
+                    print(f"  {k:<20} {o} → {v}  ⚪ （非数值）")
+                    continue
                 delta = v - o
-                if not isinstance(o, (int, float)) or abs(delta) <= 1e-9:
+                if abs(delta) <= 1e-9:
                     print(f"  {k:<20} {o} → {v}  ⚪ 持平")
                 elif k in NEUTRAL:
                     print(f"  {k:<20} {o} → {v}  ⚪ {delta:+.3f}（中性）")
@@ -258,6 +287,7 @@ async def main_async(args) -> int:
                     mark = "✅" if better else "❌"
                     print(f"  {k:<20} {o} → {v}  {mark} {delta:+.3f}")
 
+    httpd.shutdown()
     return 0 if all(verdict(r) == "PASS" for r in results) else 1
 
 
@@ -269,6 +299,8 @@ def main() -> int:
     ap.add_argument("--live", action="store_true", help="附加真实站点探针（需代理）")
     ap.add_argument("--headless", action="store_true", default=True, help="无头模式（默认开）")
     ap.add_argument("--show", dest="headless", action="store_false", help="显示浏览器窗口")
+    ap.add_argument("--engine", default="playwright", choices=["playwright", "camofox"],
+                    help="浏览器后端（camofox 需先 bash camofox/start.sh）")
     args = ap.parse_args()
     return asyncio.run(main_async(args))
 
