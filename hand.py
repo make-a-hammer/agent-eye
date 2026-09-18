@@ -188,8 +188,7 @@ class CamofoxSession:
                 self._last_snapshot = snap.get("snapshot") or ""
                 self._current_url = snap.get("url") or self._current_url
                 return {"ok": True, "title": self._title(), "url": self._current_url,
-                        "body": _snapshot_to_text(self._last_snapshot,
-                                                  msg.get("max_chars", 2000)),
+                        "body": self._body_text(msg.get("max_chars", 2000)),
                         "meta": "", "refsCount": snap.get("refsCount"),
                         "refs": self.refs()}
 
@@ -259,6 +258,40 @@ class CamofoxSession:
             self._current_url = snap.get("url") or self._current_url
         except Exception:  # noqa: BLE001
             pass
+
+    def _body_text(self, max_chars: int = 2000) -> str:
+        """
+        取正文文本（供 LLM 阅读）。
+
+        ⚠️ 为什么不能直接用 aria 快照 / body.innerText 截断：大页面的快照与
+        innerText **开头全是导航栏、侧栏、搜索建议**（实测百度结果页快照 79914
+        字符、body.innerText 4382 字符，前 2000 全在导航区，结果条目在后面）。
+        所以：先试语义内容容器 → 再回退「最大的子容器」→ 最后才是 body。
+        """
+        n = str(int(max_chars))
+        js = ("(() => {"
+              "const N=" + n + ";"
+              "const cand=document.querySelectorAll('main,article,[role=\"main\"],"
+              "#content_left,#content,.content,#results,.results');"
+              "let best=null,bl=0;"
+              "cand.forEach(e=>{const t=(e.innerText||'').trim();if(t.length>bl){bl=t.length;best=e;}});"
+              "if(!best||bl<300){"
+              "  const bodyLen=((document.body.innerText)||'').length;"
+              "  document.querySelectorAll('div,section').forEach(e=>{"
+              "    const t=(e.innerText||'').trim();"
+              "    if(t.length>bl&&t.length<bodyLen*0.95){bl=t.length;best=e;}"
+              "  });"
+              "}"
+              "const txt=best?(best.innerText||''):((document.body.innerText)||'');"
+              "return txt.slice(0,N);"
+              "})()")
+        try:
+            t = self._c.evaluate(self._tab, js)
+            if t and str(t).strip():
+                return str(t)[:max_chars]
+        except Exception:  # noqa: BLE001
+            pass
+        return _snapshot_to_text(self._last_snapshot, max_chars)
 
     # ── async 操作（与 BrowserSession 同名同签名）──
     async def navigate(self, url: str) -> tuple:
