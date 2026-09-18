@@ -264,28 +264,36 @@ class CamofoxSession:
         """
         取正文文本（供 LLM 阅读）。
 
-        ⚠️ 两个坑都在真实网站踩过：
+        ⚠️ 三个坑全在真实网站踩过：
         ① 大页面快照/innerText **开头全是导航栏、侧栏、搜索建议**（百度结果页快照
            79914 字符，前 2000 全在导航区）→ 先试语义容器 → 再回退「最大子容器」。
-        ② **目标在截断窗口之外**（长文档）→ 带 query 时以关键词为中心取窗口，
-           否则 t8_deep_keyword 那种「关键词在 3800 字处」会被直接切掉。
+        ② **目标在截断窗口之外**（长文档）→ 带 query 时以关键词为中心取窗口。
+        ③ **`innerText` 对某些页面返回空**（必应搜索结果：`li.b_algo` 有 10 条，
+           但 `body.innerText` 只有 113 字符的页脚）→ 太短时改用 `textContent`。
         """
         n = str(int(max_chars))
         js = ("(() => {"
               "const N=" + n + ";"
               "const Q=" + json.dumps((query or "").strip().lower()) + ";"
+              # innerText 对可见性敏感，某些站点（必应）会返回空 → 太短就退到 textContent
+              "const pick=(el)=>{"
+              "  const it=(el.innerText||'').trim();"
+              "  if(it.length>200) return it;"
+              "  const tc=(el.textContent||'').trim();"
+              "  return tc.length>it.length?tc:it;"
+              "};"
               "const cand=document.querySelectorAll('main,article,[role=\"main\"],"
-              "#content_left,#content,.content,#results,.results');"
+              "#content_left,#content,.content,#results,.results,#b_content,#b_results');"
               "let best=null,bl=0;"
-              "cand.forEach(e=>{const t=(e.innerText||'').trim();if(t.length>bl){bl=t.length;best=e;}});"
+              "cand.forEach(e=>{const t=pick(e);if(t.length>bl){bl=t.length;best=e;}});"
               "if(!best||bl<300){"
               "  const bodyLen=((document.body.innerText)||'').length;"
               "  document.querySelectorAll('div,section').forEach(e=>{"
-              "    const t=(e.innerText||'').trim();"
-              "    if(t.length>bl&&t.length<bodyLen*0.95){bl=t.length;best=e;}"
+              "    const t=pick(e);"
+              "    if(t.length>bl&&t.length<bodyLen*0.95+400){bl=t.length;best=e;}"
               "  });"
               "}"
-              "const txt=best?(best.innerText||''):((document.body.innerText)||'');"
+              "const txt=best?pick(best):((document.body.innerText)||document.body.textContent||'');"
               "const low=txt.toLowerCase();"
               "const hit=Q?low.indexOf(Q):-1;"
               "if(hit>N){"
