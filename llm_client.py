@@ -21,6 +21,7 @@ ENDPOINTS = {
     "deepseek": "https://api.deepseek.com/v1/chat/completions",
     "openai": "https://api.openai.com/v1/chat/completions",
     "claude": "https://api.anthropic.com/v1/messages",
+    "kimi": "https://api.moonshot.cn/v1/chat/completions",
 }
 
 # 默认模型
@@ -28,6 +29,15 @@ MODELS = {
     "deepseek": "deepseek-chat",
     "openai": "gpt-4o-mini",
     "claude": "claude-sonnet-4-20250514",
+    "kimi": "kimi-k3",
+}
+
+# 部分模型对 temperature 有硬性约束（kimi-k3 只接受 1，否则 400）
+MODEL_TEMPERATURE = {
+    "kimi-k3": 1.0,
+    "kimi-k2.7-code": 1.0,
+    "kimi-k2.7-code-highspeed": 1.0,
+    "kimi-k2.6": 1.0,
 }
 
 
@@ -39,6 +49,7 @@ def _chat_openai_compat(
     model: str,
     max_tokens: int = 4096,
     temperature: float = 0.3,
+    timeout: int = 180,
 ) -> str:
     """OpenAI 兼容 API 调用（DeepSeek / OpenAI / 本地 OpenAI 兼容服务）。"""
     payload = json.dumps({
@@ -61,7 +72,7 @@ def _chat_openai_compat(
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         return data["choices"][0]["message"]["content"].strip()
     except urllib.error.HTTPError as e:
@@ -113,8 +124,51 @@ def create_llm(
     # Claude 使用不同的 API 格式
     if provider == "claude":
         return _make_claude_fn(ep, key, m)
-    else:
-        return lambda s, u: _chat_openai_compat(s, u, ep, key, m)
+    # 按模型选 temperature（部分模型有硬性约束）
+    temp = MODEL_TEMPERATURE.get(m, 0.3)
+    return lambda s, u: _chat_openai_compat(s, u, ep, key, m, temperature=temp)
+
+
+# 本地 key 文件（key 值绝不打印、绝不出现在日志里）
+KEY_FILES = {
+    "deepseek": [r"D:/A k/hermes.txt"],
+    "kimi": [r"D:/A k/kimi.txt"],
+}
+
+
+def _read_key_from_files(provider: str) -> str | None:
+    """从本地 key 文件提取 token（跳过 'deep seek：' 这类前缀污染）。"""
+    import re as _re
+    for path in KEY_FILES.get(provider, []):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        m = _re.search(r"sk-[A-Za-z0-9_\-]{16,}", text)
+        if m:
+            return m.group(0)
+    return None
+
+
+def get_llm(provider: str = "deepseek", model: str | None = None):
+    """
+    一行拿到可用的 LLM callable：环境变量 → 本地 key 文件。
+
+    用法:
+        from llm_client import get_llm
+        llm = get_llm()                          # 自动找 key
+        thinker.decide(obs, query, llm=llm)
+    """
+    env_map = {"deepseek": "DEEPSEEK_API_KEY", "openai": "OPENAI_API_KEY",
+               "claude": "CLAUDE_API_KEY", "kimi": "MOONSHOT_API_KEY"}
+    key = os.environ.get(env_map.get(provider, ""))
+    if not key:
+        key = _read_key_from_files(provider)
+    if not key:
+        raise ValueError(
+            f"没找到 {provider} 的 key（环境变量 {env_map.get(provider)} 或本地 key 文件）")
+    return create_llm(provider=provider, api_key=key, model=model)
 
 
 def _make_claude_fn(endpoint: str, api_key: str, model: str):

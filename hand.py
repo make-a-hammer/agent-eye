@@ -80,8 +80,11 @@ class BrowserSession:
         resp = self._send({"action": "click", "selector": selector})
         return resp.get("ok", False), resp.get("selector", resp.get("error", "?"))
 
-    async def type_text(self, selector: str, text: str) -> tuple:
-        resp = self._send({"action": "type", "selector": selector, "text": text})
+    async def type_text(self, selector: str, text: str, submit: bool = False) -> tuple:
+        msg = {"action": "type", "selector": selector, "text": text}
+        if submit:
+            msg["submit"] = True
+        resp = self._send(msg)
         return resp.get("ok", False), resp.get("selector", resp.get("error", "?"))
 
     async def scroll(self, amount: int = 500) -> tuple:
@@ -269,10 +272,13 @@ class CamofoxSession:
         r = self._send({"action": "click", "ref" if is_ref else "selector": selector})
         return r.get("ok", False), r.get("selector") or r.get("error", "?")
 
-    async def type_text(self, selector: str, text: str) -> tuple:
+    async def type_text(self, selector: str, text: str, submit: bool = False) -> tuple:
         is_ref = bool(re.fullmatch(r"e\d+", selector or ""))
-        r = self._send({"action": "type", "text": text,
-                        "ref" if is_ref else "selector": selector})
+        msg = {"action": "type", "text": text,
+               "ref" if is_ref else "selector": selector}
+        if submit:
+            msg["submit"] = True
+        r = self._send(msg)
         return r.get("ok", False), r.get("error") or "ok"
 
     async def scroll(self, amount: int = 500) -> tuple:

@@ -219,6 +219,25 @@ async def run_agent(
                     if not ok:
                         history[-1]["error"] = detail
 
+            elif decision.action == "type":
+                if decision.selector:
+                    ok, detail = await hand.type_text(
+                        decision.selector, decision.text or "",
+                        submit=decision.submit)
+                    if not ok:
+                        handled, rdetail, entry = await diagnose_and_repair(
+                            protocol, repairer, "type", detail,
+                            context={"url": obs["url"], "selector": decision.selector})
+                        if handled:
+                            ok, detail = await hand.type_text(
+                                decision.selector, decision.text or "",
+                                submit=decision.submit)
+                        history[-1]["repair"] = rdetail
+                        if not ok:
+                            history[-1]["error"] = detail
+                else:
+                    history[-1]["error"] = "type 缺少 selector"
+
             elif decision.action == "wait":
                 await hand.wait(decision.delay_ms)
 
