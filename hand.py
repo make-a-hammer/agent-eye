@@ -194,7 +194,12 @@ class CamofoxSession:
                         "refs": self.refs()}
 
             if action == "click":
+                before = self._tab_ids()
                 self._c.click(self._tab, ref=msg.get("ref"), selector=msg.get("selector"))
+                # 目标可能 target="_blank" 新开标签页（百度结果全这样）——
+                # 不跟进的话 session 会停在旧页面，表现为「点了但没反应」
+                if self._follow_popup(before):
+                    self._refresh()
                 self._refresh()   # 点击可能触发导航 → 刷新 URL/快照
                 return {"ok": True, "selector": msg.get("ref") or msg.get("selector")}
 
@@ -259,6 +264,32 @@ class CamofoxSession:
             self._current_url = snap.get("url") or self._current_url
         except Exception:  # noqa: BLE001
             pass
+
+    def _tab_ids(self) -> set:
+        """当前 session 的所有 tabId（用于检测点击是否新开了标签页）。"""
+        try:
+            tabs = (self._c.list_tabs() or {}).get("tabs", [])
+            return {t.get("tabId") for t in tabs if t.get("tabId")}
+        except Exception:  # noqa: BLE001
+            return set()
+
+    def _follow_popup(self, before: set) -> bool:
+        """
+        点击若 `target="_blank"` 会新开标签页（实测百度结果链接**全部**这样）——
+        跟进最新 tab，否则 session 停在旧页面，表现为「点了但没反应」
+        （live_baidu_to_target 就是被这个坑住的：点对了，只是页面开在别处）。
+        返回是否切换了 tab。
+        """
+        try:
+            tabs = (self._c.list_tabs() or {}).get("tabs", [])
+            ids = [t.get("tabId") for t in tabs if t.get("tabId")]
+        except Exception:  # noqa: BLE001
+            return False
+        new = [i for i in ids if i not in before]
+        if new and new[-1] != self._tab:
+            self._tab = new[-1]
+            return True
+        return False
 
     def _body_text(self, max_chars: int = 2000, query: str = "") -> str:
         """

@@ -68,10 +68,11 @@ SYSTEM_PROMPT = textwrap.dedent("""\
   你的判断依据（例如「该条带『广告』标记，已跳过」）。
 - content 里保留**来源线索**（标题 + 来源名 / 域名），便于人工核对。
 
-定位元素的优先级（重要）：
-1. 若消息里有「可交互元素」列表，**优先把它的 ref 填进 selector**（如 "e3"）——
-   语义定位（按名字）比 CSS 按位置选，在导航栏/列表页里可靠得多。
-2. 没有该列表时，才用 CSS 选择器（如 "a.read-more"）。
+定位元素的优先级（**必须遵守**）：
+1. 若消息里有「可交互元素」列表，selector **必须**填列表里的 ref（如 "e3"）——
+   **不要写 CSS 选择器**（#id / .class / [attr] 都不行）。
+   实测教训：`#1`、`[id="1"] h3 a` 这类 CSS 在真实站会返回 **422 错误**，而 ref 必然有效。
+2. 只有列表里确实没有目标元素时，才用 CSS 选择器。
 
 注意：search 动作会跳到 google.com（墙内不通）；在中国站点内搜索时，
 **优先用 type 填它自己的搜索框 + submit**，而不是 search。
@@ -90,9 +91,17 @@ def make_user_message(obs: dict, query: str, history: list[dict] | None = None) 
     # 可交互元素（camofox 后端提供）→ 让 LLM 用 ref 而不是猜 CSS
     inter = obs.get("interactive") or []
     if inter:
-        lines = [f"  [{e.get('ref', '?')}] {e.get('role', '?')}: {e.get('name', '')}"
-                 for e in inter[:25]]
+        # ⚠️ 真实站陷阱：百度结果页 refs 有 146 个，**前 25 全是导航栏**（无障碍提示/
+        # 登录/设置/首页/图片-资讯-视频…）→ 只取前 25 会让 LLM 完全看不到结果链接，
+        # 于是反复"等加载"直到停滞检测终止（live_baidu_to_target 就这么挂的）。
+        # 对策：过滤无名/极短项 + 上限提到 60（约 800 token，可接受）。
+        useful = [e for e in inter if len((e.get("name") or "").strip()) >= 4]
+        show = (useful or inter)[:60]
+        lines = [f"  [{e.get('ref', '?')}] {e.get('role', '?')}: "
+                 f"{(e.get('name') or '').strip()[:70]}" for e in show]
         parts.append("## 可交互元素（点击时优先把 ref 填进 selector）\n" + "\n".join(lines))
+        if len(inter) > len(show):
+            parts.append(f"（本页共 {len(inter)} 个可交互元素，此处列最相关的 {len(show)} 个）")
     if history:
         recent = history[-5:]  # 只保留最近 5 步
         parts.append(f"## 之前尝试过\n{json.dumps(recent, ensure_ascii=False, indent=2)}")

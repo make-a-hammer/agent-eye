@@ -84,6 +84,35 @@ LIVE_SUITE = [
         "human_steps": 1,
         "max_steps": 3,
     },
+    {
+        "id": "live_baidu_to_target",
+        "desc": "跨站多步：百度搜索 → 点进第一条自然结果 → 提取正文",
+        "url": "https://www.baidu.com",
+        "query": ("在搜索框输入「固态电池 量产」，提交后从结果里点进第一条自然"
+                  "搜索结果（跳过广告），提取目标网页的正文要点"),
+        "min_len": 20,
+        "url_not_contains": "baidu.com",   # 必须真的离开百度域，才算跨站成功
+        "human_steps": 5,                  # 填+提交+选结果+点进+看
+        "max_steps": 7,
+    },
+    {
+        "id": "live_chinadaily_en",
+        "desc": "英文站：中国日报英文版首页头条",
+        "url": "https://www.chinadaily.com.cn",
+        "query": "Extract the headline of the first top news story on this page",
+        "min_len": 10,
+        "human_steps": 1,
+        "max_steps": 3,
+    },
+    {
+        "id": "live_stackoverflow",
+        "desc": "反爬站 + 英文：StackOverflow 首页提一个问题标题（403 风险）",
+        "url": "https://stackoverflow.com",
+        "query": "Extract the title of the first question on this page",
+        "min_len": 10,
+        "human_steps": 1,
+        "max_steps": 3,
+    },
 ]
 
 
@@ -106,15 +135,23 @@ async def run_suite(args) -> int:
                  "steps_taken": 0, "history": []}
         wall = int((time.time() - t0) * 1000)
         res = (r.get("result") or "")
+        hist = r.get("history") or []
+        final_url = hist[-1].get("url", "") if hist else ""
+        # 断言：① agent 自报成功 ② 结果够长 ③（可选）确实离开了起始域
         ok = bool(r.get("success")) and len(res.strip()) >= t["min_len"]
+        ban = t.get("url_not_contains")
+        if ok and ban and ban in final_url:
+            ok = False
+            res = f"[未离开 {ban}，仍在 {final_url[:60]}] " + res[:80]
         flag = "✅" if ok else "❌"
-        print(f"  {flag} [{i}/{len(LIVE_SUITE)}] {t['id']:<20} {r.get('steps_taken')} 步 "
+        print(f"  {flag} [{i}/{len(LIVE_SUITE)}] {t['id']:<22} {r.get('steps_taken')} 步 "
               f"{wall/1000:.0f}s  human={t['human_steps']}")
         print(f"      {res[:110].replace(chr(10), ' ')}")
         results.append({
             "id": t["id"], "desc": t["desc"], "url": t["url"],
             "success": ok, "agent_success": bool(r.get("success")),
             "steps": r.get("steps_taken", 0), "human_steps": t["human_steps"],
+            "final_url": final_url[:120],
             "wall_ms": wall, "result": res[:200].replace("\n", " "),
         })
 
