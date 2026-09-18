@@ -84,10 +84,17 @@ def decide(
     """
     if llm is None:
         # 无 LLM 时：fallback — 尝试从页面提取相关内容
+        # 注意：title 与 body 都要查——标题命中同样是有效结果
+        # （browse_bench.py t1_title_hit 曾因此失败）
         body = obs.get("body_snippet", "")
-        if query.lower() in body.lower():
+        title = obs.get("title", "")
+        q = query.lower()
+        if q in body.lower():
             return Decision(action="extract", content=body[:500],
                            reason="fallback: 关键词匹配到正文")
+        if q in title.lower():
+            return Decision(action="extract", content=(title + "\n" + body)[:500],
+                           reason="fallback: 关键词匹配到标题")
         return Decision(action="done", reason="无 LLM 且关键词未匹配")
 
     user_msg = make_user_message(obs, query, history)

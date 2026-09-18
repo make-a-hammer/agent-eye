@@ -40,3 +40,6 @@ gen_desc.py
 tavily_*_probe*.py
 test_xhs_api.py
 login_site.py
+
+# 运行时截图产物
+.screenshots/
